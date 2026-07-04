@@ -8,5 +8,7 @@ func Route(command string) {
 		modes.RunWorkMode()
 	case "02":
 		modes.RunResearchMode()
+	case "03":
+		modes.RunSocialMode()
 	}
 }
