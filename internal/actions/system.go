@@ -5,7 +5,7 @@ import (
 	"os/exec"
 )
 
-// RunAppleScript, sadece uygulama açmakla kalmaz, komut da gönderir
+// RunCommand AppleScript için
 func RunCommand(script string) {
 	fmt.Println("Executing script:", script)
 	cmd := exec.Command("osascript", "-e", script)
@@ -15,7 +15,15 @@ func RunCommand(script string) {
 	}
 }
 
-// Orijinal fonksiyonu bozmamak için bu ismi koruyalım
+// Yeni: Terminal komutları (afplay vb.) için
+func RunTerminalCommand(command string, args ...string) {
+	cmd := exec.Command(command, args...)
+	err := cmd.Run()
+	if err != nil {
+		fmt.Printf("Terminal command failed: %v\n", err)
+	}
+}
+
 func RunAppleScript(appName string) {
 	script := fmt.Sprintf(`tell application "%s" to activate`, appName)
 	RunCommand(script)

@@ -2,9 +2,11 @@ package modes
 
 import "ark/internal/actions"
 
+// Ses dosyasının yolu
+const FINISH_SOUND = "/Users/tony/Desktop/ark/assets/ark_finish.wav"
+
 func RunWorkMode() {
 	// 0. ÖNCELİK: Odak Modu (DND Aç)
-	// "Do Not Disturb" modunu aktif etmek için System Events kullanıyoruz
 	actions.RunCommand(`tell application "System Events" to tell control center to set focus mode to true`)
 
 	// 1. Spotify
@@ -24,6 +26,9 @@ func RunWorkMode() {
 	// 4. Notes
 	actions.RunCommand(`delay 0.5`)
 	actions.RunCommand(`tell application "Notes" to activate`)
+
+	// 5. ARK Konuşsun
+	actions.RunTerminalCommand("afplay", FINISH_SOUND)
 }
 
 func OpenGmailAndRestore() {
