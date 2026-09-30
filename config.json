@@ -1,0 +1,53 @@
+{
+    "ai": {
+        "provider": "ollama",
+        "models": {
+            "architect": "deepseek-r1",
+            "coder": "qwen2.5-coder"
+        }
+    },
+    "workdir": "~/Desktop/ark",
+    "assets": {
+        "listening_sound": "ark_listening.wav"
+    },
+    "commands": {
+        "01": {
+            "name": "work",
+            "keywords": [
+                "01",
+                "zero one",
+                "work"
+            ],
+            "sound": "ark_finish.wav"
+        },
+        "02": {
+            "name": "research",
+            "keywords": [
+                "02",
+                "zero two",
+                "research"
+            ],
+            "sound": "ark_research.wav"
+        },
+        "03": {
+            "name": "social",
+            "keywords": [
+                "03",
+                "zero three",
+                "social"
+            ],
+            "sound": "ark_social.wav"
+        },
+        "04": {
+            "name": "hud",
+            "keywords": [
+                "04",
+                "zero four",
+                "monitor",
+                "status",
+                "hud"
+            ],
+            "sound": "ark_system.wav"
+        }
+    }
+}

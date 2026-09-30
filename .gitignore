@@ -1,5 +1,11 @@
+# Python & Sanal Ortam
 venv/
 __pycache__/
 *.pyc
+
+# Ağır Vosk Modeli ve Derlenmiş Binary'ler
+model/
 ark_bin
+
+# macOS Sistem Dosyası
 .DS_Store
