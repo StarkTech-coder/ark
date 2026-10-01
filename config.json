@@ -16,7 +16,15 @@
             "keywords": [
                 "01",
                 "zero one",
-                "work"
+                "work",
+                "working",
+                "start work",
+                "start",
+                "workspace",
+                "focus",
+                "office",
+                "coding",
+                "code"
             ],
             "sound": "ark_finish.wav"
         },
@@ -25,7 +33,13 @@
             "keywords": [
                 "02",
                 "zero two",
-                "research"
+                "research",
+                "search",
+                "browser",
+                "safari",
+                "web",
+                "info",
+                "study"
             ],
             "sound": "ark_research.wav"
         },
@@ -34,7 +48,12 @@
             "keywords": [
                 "03",
                 "zero three",
-                "social"
+                "social",
+                "chat",
+                "messages",
+                "whatsapp",
+                "instagram",
+                "connect"
             ],
             "sound": "ark_social.wav"
         },
@@ -45,7 +64,10 @@
                 "zero four",
                 "monitor",
                 "status",
-                "hud"
+                "hud",
+                "system",
+                "stats",
+                "btop"
             ],
             "sound": "ark_system.wav"
         }

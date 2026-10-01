@@ -47,3 +47,31 @@ func RunAppleScript(appName string) {
 	script := fmt.Sprintf(`tell application "%s" to activate`, appName)
 	RunCommand(script)
 }
+
+// SwitchSpaceRight moves to the next macOS Space on the right.
+func SwitchSpaceRight() {
+	// Key code 124 = Right Arrow
+	script := `tell application "System Events" to key code 124 using {control down}`
+	RunCommand(script)
+	RunCommand(`delay 0.6`) // Buffer delay for macOS Space transition animation
+}
+
+// SwitchSpaceLeft moves to the previous macOS Space on the left.
+func SwitchSpaceLeft() {
+	// Key code 123 = Left Arrow
+	script := `tell application "System Events" to key code 123 using {control down}`
+	RunCommand(script)
+	RunCommand(`delay 0.6`)
+}
+
+// GoToFirstSpace returns to Space 1 safely by issuing left window switches and checks execution errors.
+func GoToFirstSpace() {
+	for i := 0; i < 3; i++ {
+		script := `tell application "System Events" to key code 123 using {control down}`
+		cmd := exec.Command("osascript", "-e", script)
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("Space switch failed (Left): %v\n", err)
+		}
+	}
+	RunCommand(`delay 0.5`)
+}

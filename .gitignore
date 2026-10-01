@@ -1,11 +1,24 @@
 # Python & Sanal Ortam
 venv/
+.venv/
 __pycache__/
 *.pyc
+*.pyo
 
 # Ağır Vosk Modeli ve Derlenmiş Binary'ler
 model/
 ark_bin
 
-# macOS Sistem Dosyası
+# Sistem ve Editör Dosyaları
 .DS_Store
+.vscode/
+.idea/
+
+# Ortam Değişkenleri ve Loglar
+.env
+*.log
+
+# Geçici ve Node/Build Çıktıları
+node_modules/
+dist/
+build/

@@ -49,14 +49,18 @@ def listen_once() -> None:
     # 1. Play notification sound synchronously FIRST (Block until audio finishes)
     if os.path.exists(LISTENING_AUDIO_PATH):
         subprocess.run(["afplay", LISTENING_AUDIO_PATH])
+    else:
+        print(
+            f"[ARK WARN] Listening sound missing at '{LISTENING_AUDIO_PATH}'. Proceeding silently..."
+        )
 
     # 2. Open microphone ONLY AFTER the listening sound has finished playing
     r = sr.Recognizer()
     print("ARK: Listening (Offline)... Speak now!")
 
     with sr.Microphone() as source:
-        # Dynamically measure noise floor and set a safe lower threshold bound
-        r.adjust_for_ambient_noise(source, duration=0.3)
+        # Dynamically measure noise floor and set a safe lower threshold bound  ne    s
+        r.adjust_for_ambient_noise(source, duration=0.1)
         r.energy_threshold = max(r.energy_threshold, 300)
 
         try:
@@ -71,7 +75,7 @@ def listen_once() -> None:
             cmd = result.get("text", "").lower()
             print(f"Command received: '{cmd}'")
 
-            if not cmd:
+            if not cmd: 
                 print("Audio unrecognized or empty input.")
                 return
 
