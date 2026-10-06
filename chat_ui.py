@@ -15,6 +15,7 @@ import chainlit as cl
 from chainlit.server import app
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+import httpx
 from ollama import AsyncClient
 import pyaudio
 from vosk import KaldiRecognizer, Model
@@ -57,7 +58,7 @@ config_data = load_config()
 
 # Config'den aktif model ismini dinamik çekiyoruz (Tak-çıkar mimari)
 AI_CONFIG = config_data.get("ai", {})
-ACTIVE_MODEL = AI_CONFIG.get("active_model", "qwen3:8b")
+DEFAULT_ACTIVE_MODEL = AI_CONFIG.get("active_model", "qwen3:8b")
 
 LISTENING_AUDIO_PATH = os.path.join(
     BASE_DIR,
@@ -354,7 +355,7 @@ async def api_web_toggle():
 
 
 # ============================================================================
-# CHAT START (Stark HUD Başlangıç)
+# CHAT START & SETTINGS (Stark HUD Başlangıç ve Model Seçim Paneli)
 # ============================================================================
 
 
@@ -362,11 +363,66 @@ async def api_web_toggle():
 async def start():
     GLOBAL_APP_STATE["web_search_active"] = False
 
+    # Yereldeki Ollama'dan indirili modelleri dinamik çekelim ve filtreleyelim
+    models = [DEFAULT_ACTIVE_MODEL]
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get("http://localhost:11434/api/tags", timeout=2.0)
+            if response.status_code == 200:
+                data = response.json()
+                raw_models = data.get("models", [])
+
+                valid_models = []
+                for m in raw_models:
+                    model_name = m.get("name", "").lower()
+                    # Embedding (bge-m3 vb.) veya rerank modellerini sohbet listesinden hariç tutuyoruz
+                    if any(
+                        keyword in model_name
+                        for keyword in ["bge", "embed", "embedding", "rerank"]
+                    ):
+                        continue
+                    valid_models.append(m.get("name"))
+
+                if valid_models:
+                    models = valid_models
+    except Exception:
+        pass  # Ollama kapalıysa config/varsayılan liste ile devam eder
+
+    # Arayüze Ayarlar (Settings) Menüsünü Koyalım
+    settings = await cl.ChatSettings(
+        [
+            cl.input_widget.Select(
+                id="ModelSelect",
+                label="ARK Model Seçimi",
+                values=models,
+                initial_value=(
+                    DEFAULT_ACTIVE_MODEL
+                    if DEFAULT_ACTIVE_MODEL in models
+                    else models[0]
+                ),
+            )
+        ]
+    ).send()
+
+    selected_model = settings.get("ModelSelect", DEFAULT_ACTIVE_MODEL)
+    cl.user_session.set("current_model", selected_model)
+
     await cl.Message(
         content=(
             "🛡️ **ARK SYSTEM ONLINE (Stark HUD Protocol)**\n\n"
-            f"Aktif Model: `{ACTIVE_MODEL}` | Sistem tam operasyonel."
+            f"Aktif Model: `{selected_model}` | Sistem tam operasyonel."
         ),
+        author="ARK",
+    ).send()
+
+
+# Kullanıcı ayarlardan modeli değiştirdiğinde tetiklenir
+@cl.on_settings_update
+async def settings_update(settings):
+    selected_model = settings.get("ModelSelect", DEFAULT_ACTIVE_MODEL)
+    cl.user_session.set("current_model", selected_model)
+    await cl.Message(
+        content=f"⚙️ **ARK Sistem Güncellendi:** Aktif Model `{selected_model}` olarak ayarlandı.",
         author="ARK",
     ).send()
 
@@ -379,6 +435,9 @@ async def start():
 @cl.on_message
 async def main(message: cl.Message):
     raw_text = message.content.strip()
+
+    # Aktif modeli oturumdan alalım (Eğer seçilmediyse varsayılanı kullansın)
+    active_model = cl.user_session.get("current_model", DEFAULT_ACTIVE_MODEL)
 
     # 1. GİZLİ KOMUT YAKALAYICI (/cmd)
     if raw_text.startswith("/cmd "):
@@ -433,9 +492,9 @@ async def main(message: cl.Message):
     client = AsyncClient(host="http://127.0.0.1:11434")
 
     try:
-        print(f"[ARK LLM] Model ({ACTIVE_MODEL}) isteği gönderiliyor...")
+        print(f"[ARK LLM] Model ({active_model}) isteği gönderiliyor...")
         stream = await client.chat(
-            model=ACTIVE_MODEL,
+            model=active_model,
             messages=[{"role": "user", "content": text}],
             stream=True,
             keep_alive=-1,

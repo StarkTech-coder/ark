@@ -176,7 +176,7 @@ alert_style = "classic"
 # Load assistant logo directly from URL.
 custom_logo = "/logo_dark.png"
 
-# Load assistant favicon directly.
+# Load assistant favicon directly. (PNG formatına güncellendi)
 custom_favicon = "/favicon.png"
 
 # Load assistant avatar image directly from URL.

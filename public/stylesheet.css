@@ -1,4 +1,33 @@
 /* ==========================================================================
+   UI TAŞMA VE KAYMA DÜZELTMELERİ (OVERFLOW FIX)
+   ========================================================================== */
+
+/* Mesaj ve içerik alanlarının ekrandan taşmasını engeller */
+main [class*="message"],
+main pre,
+main code {
+    max-width: 100% !important;
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    overflow-x: auto !important;
+}
+
+/* Kod bloklarının container dışına çıkmasını önler */
+pre {
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    box-sizing: border-box !important;
+}
+
+/* Chainlit içerik kapsayıcısı genişlik güvenliği */
+[class*="message-content"],
+[class*="content"] {
+    max-width: 100% !important;
+    overflow: hidden !important;
+}
+
+
+/* ==========================================================================
    STARK HUD - BUTON AKTİF DURUMU (TOGGLE STATE)
    ========================================================================== */
 
