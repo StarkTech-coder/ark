@@ -1,6 +1,7 @@
 {
     "ai": {
         "provider": "ollama",
+        "active_model": "qwen3:8b",
         "models": {
             "architect": "deepseek-r1",
             "coder": "qwen2.5-coder"

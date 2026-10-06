@@ -174,10 +174,10 @@ alert_style = "classic"
 # custom_meta_image_url = "https://chainlit-cloud.s3.eu-west-3.amazonaws.com/logo/chainlit_banner.png"
 
 # Load assistant logo directly from URL.
-custom_logo = "/public/logo_dark.png"
+custom_logo = "/logo_dark.png"
 
 # Load assistant favicon directly.
-custom_favicon = "/public/favicon.png"
+custom_favicon = "/favicon.png"
 
 # Load assistant avatar image directly from URL.
 default_avatar_file_url = ""
