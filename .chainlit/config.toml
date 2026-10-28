@@ -144,14 +144,12 @@ confirm_new_chat = true
 cot = "full"
 
 # Specify a CSS file that can be used to customize the user interface.
-# The CSS file can be served from the public directory or via an external link.
 custom_css = "/public/stylesheet.css"
 
 # Specify additional attributes for a custom CSS file
 # custom_css_attributes = "media=\"print\""
 
 # Specify a JavaScript file that can be used to customize the user interface.
-# The JavaScript file can be served from the public directory.
 custom_js = "/public/script.js"
 
 # The style of alert boxes. Can be "classic" or "modern".
@@ -176,7 +174,7 @@ alert_style = "classic"
 # Load assistant logo directly from URL.
 custom_logo = "/logo_dark.png"
 
-# Load assistant favicon directly. (PNG formatına güncellendi)
+# Load assistant favicon directly.
 custom_favicon = "/favicon.png"
 
 # Load assistant avatar image directly from URL.

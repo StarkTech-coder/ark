@@ -1,24 +1,30 @@
-# Python & Sanal Ortam
+# Python & Virtual Environment
 venv/
 .venv/
 __pycache__/
 *.pyc
 *.pyo
 
-# Ağır Vosk Modeli ve Derlenmiş Binary'ler
+# Heavy Vosk Models & Compiled Binaries
 model/
 ark_bin
 
-# Sistem ve Editör Dosyaları
+# System & Editor Files
 .DS_Store
 .vscode/
 .idea/
 
-# Ortam Değişkenleri ve Loglar
+# Environment Variables & Logs
 .env
 *.log
 
-# Geçici ve Node/Build Çıktıları
+# Temporary & Build Outputs
 node_modules/
 dist/
 build/
+
+# Local Documents, Vector Database & SQLite Memories
+documents/
+lancedb_data/
+ark_memory.db
+memory/

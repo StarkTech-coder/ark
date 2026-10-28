@@ -1,8 +1,10 @@
 """
-ARK Chainlit user interface & offline audio controller (Stark HUD - Lean Core).
+ARK Chainlit user interface & offline audio controller with LanceDB RAG & SQLite Memory.
+Optimized for M2 MacBook Air (16 GB RAM) with global state synchronization and debug logging.
 """
 
 import asyncio
+import glob
 import json
 import os
 import re
@@ -20,31 +22,21 @@ from ollama import AsyncClient
 import pyaudio
 from vosk import KaldiRecognizer, Model
 
+# Import optimized local RAG and Memory controllers
+from rag.vector_store import insert_documents, query_context, smart_chunk_pdf_text
+from memory.db import save_message, get_recent_history, set_memory, get_memory
+
 # ============================================================================
 # PATHS & CONFIG
 # ============================================================================
 
 BASE_DIR = os.path.expanduser("~/Desktop/ark")
+DOCS_DIR = os.path.join(BASE_DIR, "documents")
 
-CONFIG_PATH = os.path.join(
-    BASE_DIR,
-    "config.json",
-)
-
-MODEL_PATH = os.path.join(
-    BASE_DIR,
-    "model",
-)
-
-MODEL_TR_PATH = os.path.join(
-    BASE_DIR,
-    "model_tr",
-)
-
-ARK_BIN = os.path.join(
-    BASE_DIR,
-    "ark_bin",
-)
+CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+MODEL_PATH = os.path.join(BASE_DIR, "model")
+MODEL_TR_PATH = os.path.join(BASE_DIR, "model_tr")
+ARK_BIN = os.path.join(BASE_DIR, "ark_bin")
 
 
 def load_config():
@@ -55,23 +47,17 @@ def load_config():
 
 
 config_data = load_config()
-
-# Config'den aktif model ismini dinamik çekiyoruz (Tak-çıkar mimari)
 AI_CONFIG = config_data.get("ai", {})
 DEFAULT_ACTIVE_MODEL = AI_CONFIG.get("active_model", "qwen3:8b")
 
 LISTENING_AUDIO_PATH = os.path.join(
     BASE_DIR,
     "assets",
-    config_data.get("assets", {}).get(
-        "listening_sound",
-        "ark_listening.wav",
-    ),
+    config_data.get("assets", {}).get("listening_sound", "ark_listening.wav"),
 )
 
-
 # ============================================================================
-# FASTAPI STATIC MOUNT (Public Klasörü / Logo ve Favicon Erişimi)
+# FASTAPI STATIC MOUNT
 # ============================================================================
 
 app.mount(
@@ -80,45 +66,75 @@ app.mount(
     name="public",
 )
 
-
 # ============================================================================
-# GLOBAL STATE (CHAINLIT CONTEXT BAGIMSIZLIGI)
+# GLOBAL & SESSION STATE DEFAULTS (Single-User Optimized)
 # ============================================================================
 
 _vosk_model = None
 _vosk_model_tr = None
 stop_event = threading.Event()
 
-# Web arama modunu Chainlit session yerine güvenli global state'de tutuyoruz
-GLOBAL_APP_STATE = {"web_search_active": False}
+# Global state to prevent FastAPI / Chainlit session sync mismatches
+GLOBAL_APP_STATE = {
+    "web_search_active": False,
+    "rag_search_active": True,  # RAG default active for seamless document querying
+}
+
+# ============================================================================
+# AUTOMATIC DOCUMENTS FOLDER INGESTOR
+# ============================================================================
+
+
+def auto_ingest_documents():
+    """Automatically scans and ingests PDFs found in ~/Desktop/ark/documents/ directory upon startup."""
+    if not os.path.exists(DOCS_DIR):
+        os.makedirs(DOCS_DIR, exist_ok=True)
+        return
+
+    pdf_files = glob.glob(os.path.join(DOCS_DIR, "*.pdf"))
+    for pdf_path in pdf_files:
+        pdf_name = os.path.basename(pdf_path)
+        try:
+            import pypdf
+
+            reader = pypdf.PdfReader(pdf_path)
+            file_content = ""
+            for page_idx, page in enumerate(reader.pages):
+                page_text = page.extract_text()
+                if page_text:
+                    file_content += f"\n[Page {page_idx + 1}]\n" + page_text + "\n\n"
+
+            if file_content.strip():
+                chunks = smart_chunk_pdf_text(file_content, source_name=pdf_name)
+                if chunks:
+                    texts = [c["text"] for c in chunks]
+                    insert_documents(texts, source_name=pdf_name, is_academic=True)
+                    print(f"[ARK DOCS AUTO-INGEST] Successfully indexed: {pdf_name}")
+        except Exception as e:
+            print(f"[ARK DOCS AUTO-INGEST ERROR] {pdf_name}: {e}")
 
 
 # ============================================================================
-# GO WEB SCRAPING BRIDGE & SMART INTENT ROUTER (Go Motoru Entegrasyonu)
+# GO WEB SCRAPING BRIDGE & SMART INTENT ROUTER
 # ============================================================================
 
 
 def call_ark_api(service: str, param: str = "") -> str:
-    """Go ark_bin üzerindeki API veya pipeline aracını çalıştırır."""
+    """Executes Go ark_bin API or pipeline tool."""
     try:
         cmd = [ARK_BIN, service]
         if param:
             cmd.append(param)
-
         result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=10,
+            cmd, capture_output=True, text=True, check=True, timeout=10
         )
         return result.stdout.strip()
     except Exception as e:
-        return f"[API Çağrı Hatası ({service}): {str(e)}]"
+        return f"[API Call Error ({service}): {str(e)}]"
 
 
 def fetch_web_content(url: str) -> str:
-    """Go ile yazılmış ark_bin aracını kullanarak hedef URL'yi kazır ve temiz metni hazırlar."""
+    """Scrapes target URL using Go ark_bin tool with detailed debugging logs."""
     try:
         result = subprocess.run(
             [ARK_BIN, "web", url],
@@ -127,26 +143,51 @@ def fetch_web_content(url: str) -> str:
             check=True,
             timeout=15,
         )
-        return result.stdout.strip()
+        output = result.stdout.strip()
+        print("[ARK WEB] URL:", url)
+        print("[ARK WEB] Return code:", result.returncode)
+        print("[ARK WEB] Stdout length:", len(output))
+        print("[ARK WEB] Stdout preview:", repr(output[:500]))
+        print("[ARK WEB] Stderr:", result.stderr[:1000])
+        return output
     except subprocess.CalledProcessError as e:
-        return f"[Web Kazıma Hatası (Go): {e.stderr.strip()}]"
+        print("[ARK WEB ERROR] Return code:", e.returncode)
+        print("[ARK WEB ERROR] Stdout:", e.stdout)
+        print("[ARK WEB ERROR] Stderr:", e.stderr)
+        return f"[Web Scraping Error (Go): {e.stderr.strip()}]"
     except Exception as e:
-        return f"[Web Bağlantı Hatası: {str(e)}]"
+        print("[ARK WEB ERROR]", repr(e))
+        return f"[Web Connection Error: {str(e)}]"
 
 
 def clean_search_query(user_prompt: str) -> str:
-    """Kullanıcının sorgusundaki gereksiz tırnakları ve fazla boşlukları temizler."""
     clean_prompt = re.sub(r'["\']', "", user_prompt)
-    clean_prompt = " ".join(clean_prompt.split())
-    return clean_prompt
+    return " ".join(clean_prompt.split())
 
 
-def process_user_prompt_with_web(user_prompt: str) -> str:
-    """Go Native Pipeline & Dynamic Context Injector."""
+def process_user_prompt_with_rag_and_web(user_prompt: str, rag_active: bool) -> str:
+    """Conditional Pipeline: Queries LanceDB RAG only if globally toggled on."""
     web_search_active = GLOBAL_APP_STATE.get("web_search_active", False)
     collected_contexts = []
 
-    # 1. Go Engine Üzerinden Tüm Intent'leri Paralel Çalıştır ve Çek
+    print(
+        f"[ARK PIPELINE] Evaluating prompt. RAG Active: {rag_active}, Web Active: {web_search_active}"
+    )
+
+    # 1. Retrieve relevant context from local LanceDB RAG (Explicitly search academic collection)
+    if rag_active:
+        try:
+            rag_snippets = query_context(user_prompt, top_k=3, search_academic=True)
+            print(f"[ARK RAG] Retrieved snippets count: {len(rag_snippets)}")
+            if rag_snippets:
+                rag_text = "\n".join(rag_snippets)
+                collected_contexts.append(
+                    f"[LOCAL DOCUMENTS / KNOWLEDGE BASE (RAG)]\n{rag_text}"
+                )
+        except Exception as e:
+            print(f"[ARK RAG ERROR] Failed to query vector store: {e}")
+
+    # 2. Go Engine Pipeline
     try:
         go_intent_data = call_ark_api("pipeline", user_prompt)
         if (
@@ -156,9 +197,9 @@ def process_user_prompt_with_web(user_prompt: str) -> str:
         ):
             collected_contexts.append(go_intent_data)
     except Exception as e:
-        print(f"[ARK ROUTER ERROR] Go pipeline çağrı hatası: {e}")
+        print(f"[ARK ROUTER ERROR] Go pipeline call error: {e}")
 
-    # 2. Genel Web Araması (Eğer Web Modu Aktifse veya URL İçeriyorsa)
+    # 3. General Web Search
     url_match = re.search(r"https?://[^\s]+", user_prompt)
     target_url = None
 
@@ -168,16 +209,9 @@ def process_user_prompt_with_web(user_prompt: str) -> str:
         search_query = clean_search_query(user_prompt)
         query = quote_plus(search_query)
         target_url = f"https://html.duckduckgo.com/html/?q={query}"
-        print(f"[ARK HUD] Genel Web Araması Yapılıyor - Sorgu: {search_query}")
 
     if target_url:
         scraped_text = fetch_web_content(target_url)
-
-        # --- DEBUG LOGLARI (VERİ KONTROLÜ) ---
-        print("\n" + "=" * 50)
-        print(f"[DEBUG WEB SEARCH OUTPUT]:\n{scraped_text}")
-        print("=" * 50 + "\n")
-
         if (
             scraped_text
             and "HATA" not in scraped_text
@@ -185,63 +219,56 @@ def process_user_prompt_with_web(user_prompt: str) -> str:
         ):
             collected_contexts.append(f"[WEB RESULTS]\n{scraped_text}")
 
-    # 3. Context Injection ve Prompt Bağlama
+    # 4. Context Injection
     if collected_contexts:
         combined_context = "\n\n----------------------------------------\n\n".join(
             collected_contexts
         )
         system_instruction = (
-            "[STARK HUD PROTOCOL - CANLI VERİ VE WEB BAĞLAMI]\n"
-            "- Aşağıda anlık sistem servislerinden ve web arama sonuçlarından çekilen bilgiler yer almaktadır.\n"
-            "- KURAL 1: Kullanıcının sorusunu öncelikle sana sağlanan bu [WEB RESULTS] ve canlı verileri baz alarak yanıtla.\n"
-            "- KURAL 2: Eğer arama sonuçlarında spesifik bir mekan, güncel bilgi veya veri açıkça geçmiyorsa KENDİ BİLGİNDEN UYDURMA. Bilginin sonuçlarda olmadığını belirt."
+            "[STARK HUD PROTOCOL - CONTEXT INJECTION]\n"
+            "- Below is retrieved knowledge from local RAG database, live services, and web results.\n"
+            "- RULE 1: Answer the user's request primarily based on this provided context.\n"
+            "- RULE 2: If specific facts are missing in the context, do not hallucinate."
         )
-        return f"{system_instruction}\n\n{combined_context}\n\nKullanıcı İsteği: {user_prompt}"
+        return (
+            f"{system_instruction}\n\n{combined_context}\n\nUser Request: {user_prompt}"
+        )
 
-    # CANLI VERİ ÇEKİLMEDİYSE (Pasif Guardrail - Modeli Kısıtlamaz)
     pasif_instruction = (
-        "[SİSTEM TALİMATI]\n"
-        "Özel bir canlı veri çekilmedi. Soruyu kendi geniş bilgi birikimini kullanarak doğrudan ve özgüvenle yanıtla. "
-        "Sakın 'Arama modum kapalı' veya 'Erişimim yok' gibi ifadeler KULLANMA."
+        "[SYSTEM INSTRUCTION]\n"
+        "No external or RAG context was retrieved. Answer directly using your internal knowledge base."
     )
-    return f"{pasif_instruction}\n\nKullanıcı İsteği: {user_prompt}"
+    return f"{pasif_instruction}\n\nUser Request: {user_prompt}"
 
 
 # ============================================================================
-# VOSK MODELS (Offline English & Turkish STT)
+# VOSK MODELS
 # ============================================================================
 
 
 def get_vosk_model():
     global _vosk_model
     if _vosk_model is None and os.path.exists(MODEL_PATH):
-        print("[ARK VOSK EN] İngilizce model yükleniyor...")
         _vosk_model = Model(MODEL_PATH)
-        print("[ARK VOSK EN] İngilizce model hazır.")
     return _vosk_model
 
 
 def get_vosk_model_tr():
     global _vosk_model_tr
     if _vosk_model_tr is None and os.path.exists(MODEL_TR_PATH):
-        print("[ARK VOSK TR] Türkçe model yükleniyor...")
         _vosk_model_tr = Model(MODEL_TR_PATH)
-        print("[ARK VOSK TR] Türkçe model hazır.")
     return _vosk_model_tr
 
 
 def record_and_recognize(phrase_limit_sec=15, use_tr=False):
     global stop_event
     stop_event.clear()
-
     model = get_vosk_model_tr() if use_tr else get_vosk_model()
     if not model:
-        model_name = "model_tr" if use_tr else "model"
-        return f"[HATA: Vosk Modeli '{model_name}' klasöründe bulunamadı]"
+        return "[ERROR: Vosk Model not found]"
 
     rec = KaldiRecognizer(model, 16000)
     p = pyaudio.PyAudio()
-
     try:
         stream = p.open(
             format=pyaudio.paInt16,
@@ -252,19 +279,12 @@ def record_and_recognize(phrase_limit_sec=15, use_tr=False):
         )
     except Exception as e:
         p.terminate()
-        return f"[HATA: Mikrofon Erişimi - {str(e)}]"
+        return f"[ERROR: Microphone Access - {str(e)}]"
 
-    lang_label = "TÜRKÇE" if use_tr else "İNGİLİZCE"
-    print(
-        f"[ARK AUDIO - {lang_label}] Dinleme aktif (Max Süre: {phrase_limit_sec}s)..."
-    )
     start_time = time.time()
-
     try:
         while True:
-            if stop_event.is_set():
-                break
-            if time.time() - start_time > phrase_limit_sec:
+            if stop_event.is_set() or (time.time() - start_time > phrase_limit_sec):
                 break
             try:
                 data = stream.read(2000, exception_on_overflow=False)
@@ -273,11 +293,8 @@ def record_and_recognize(phrase_limit_sec=15, use_tr=False):
                 rec.AcceptWaveform(data)
             except Exception:
                 break
-
         res = json.loads(rec.FinalResult())
-        text = res.get("text", "")
-        print(f"[ARK AUDIO - {lang_label}] Algılanan: '{text}'")
-        return text
+        return res.get("text", "")
     finally:
         stream.stop_stream()
         stream.close()
@@ -285,13 +302,12 @@ def record_and_recognize(phrase_limit_sec=15, use_tr=False):
 
 
 # ============================================================================
-# LOCAL API ENDPOINTS
+# LOCAL API ENDPOINTS (STT, CMD, WEB TOGGLE, RAG TOGGLE)
 # ============================================================================
 
 
 @app.post("/ark/listen/stt")
 async def api_listen_stt():
-    """Normal sohbet mikrofonu: Türkçe STT kullanır."""
     loop = asyncio.get_event_loop()
     text = await loop.run_in_executor(None, record_and_recognize, 20, True)
     return JSONResponse({"text": text})
@@ -306,31 +322,23 @@ async def api_listen_stop():
 
 @app.post("/ark/listen/cmd")
 async def api_listen_cmd():
-    """Hızlı Sistem Komutları (Yıldırım Butonu): İngilizce Vosk modeli kullanır."""
     loop = asyncio.get_event_loop()
-
-    # 1. Bip / Dinleme sesi çal
     if os.path.exists(LISTENING_AUDIO_PATH):
         await loop.run_in_executor(
-            None,
-            lambda: subprocess.run(["afplay", LISTENING_AUDIO_PATH]),
+            None, lambda: subprocess.run(["afplay", LISTENING_AUDIO_PATH])
         )
-
-    # 2. İNGİLİZCE Vosk modeli ile dinleme (use_tr=False)
     cmd_text = await loop.run_in_executor(None, record_and_recognize, 6, False)
     cmd_text_clean = cmd_text.strip().lower()
 
     if not cmd_text_clean or "hata" in cmd_text_clean:
         return JSONResponse({"text": cmd_text, "status": "no_input"})
 
-    # 3. Config içindeki komut anahtar kelimeleri ile eşleştir
     config = load_config()
     commands = config.get("commands", {})
     dispatched_cmd = None
 
     for cmd_id, meta in commands.items():
         if any(kw in cmd_text_clean for kw in meta.get("keywords", [])):
-            print(f"[ARK CMD] Eşleşen Komut Bulundu: {meta.get('name')} (`{cmd_id}`)")
             subprocess.Popen([ARK_BIN, cmd_id], cwd=BASE_DIR)
             dispatched_cmd = meta.get("name")
             break
@@ -340,60 +348,65 @@ async def api_listen_cmd():
             {"text": cmd_text, "command": dispatched_cmd, "status": "executed"}
         )
     else:
-        print(f"[ARK CMD] Tanımsız Sesli Komut: '{cmd_text_clean}'")
         return JSONResponse({"text": cmd_text, "status": "unrecognized"})
 
 
 @app.post("/ark/web/toggle")
 async def api_web_toggle():
-    """Chainlit context gerektirmeyen güvenli web arama modu toggle endpoint'i."""
     current_state = GLOBAL_APP_STATE.get("web_search_active", False)
     new_state = not current_state
     GLOBAL_APP_STATE["web_search_active"] = new_state
-    print(f"[ARK HUD] Web Arama Modu değiştirildi: {'AKTİF' if new_state else 'PASİF'}")
+    print(f"[ARK STATE] Web Search Toggled: {new_state}")
+    return JSONResponse({"active": new_state})
+
+
+@app.post("/ark/rag/toggle")
+async def api_rag_toggle():
+    """Updated to use GLOBAL_APP_STATE to avoid session mismatches."""
+    new_state = not GLOBAL_APP_STATE["rag_search_active"]
+    GLOBAL_APP_STATE["rag_search_active"] = new_state
+    print(f"[ARK STATE] RAG Search Toggled: {new_state}")
     return JSONResponse({"active": new_state})
 
 
 # ============================================================================
-# CHAT START & SETTINGS (Stark HUD Başlangıç ve Model Seçim Paneli)
+# CHAT START & SETTINGS
 # ============================================================================
 
 
 @cl.on_chat_start
 async def start():
-    GLOBAL_APP_STATE["web_search_active"] = False
+    thread_id = cl.user_session.get("id", "default_thread")
+    cl.user_session.set("thread_id", thread_id)
 
-    # Yereldeki Ollama'dan indirili modelleri dinamik çekelim ve filtreleyelim
     models = [DEFAULT_ACTIVE_MODEL]
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get("http://localhost:11434/api/tags", timeout=2.0)
+            response = await client.get("http://localhost:11434/api/tags", timeout=5.0)
             if response.status_code == 200:
                 data = response.json()
                 raw_models = data.get("models", [])
-
-                valid_models = []
-                for m in raw_models:
-                    model_name = m.get("name", "").lower()
-                    # Embedding (bge-m3 vb.) veya rerank modellerini sohbet listesinden hariç tutuyoruz
-                    if any(
-                        keyword in model_name
-                        for keyword in ["bge", "embed", "embedding", "rerank"]
-                    ):
-                        continue
-                    valid_models.append(m.get("name"))
-
+                valid_models = [
+                    m.get("name")
+                    for m in raw_models
+                    if not any(
+                        kw in m.get("name", "").lower()
+                        for kw in ["bge", "embed", "embedding", "rerank"]
+                    )
+                ]
                 if valid_models:
                     models = valid_models
-    except Exception:
-        pass  # Ollama kapalıysa config/varsayılan liste ile devam eder
+    except Exception as e:
+        print(f"[ARK MODEL FETCH ERROR] {e}")
 
-    # Arayüze Ayarlar (Settings) Menüsünü Koyalım
+    if DEFAULT_ACTIVE_MODEL not in models:
+        models.insert(0, DEFAULT_ACTIVE_MODEL)
+
     settings = await cl.ChatSettings(
         [
             cl.input_widget.Select(
                 id="ModelSelect",
-                label="ARK Model Seçimi",
+                label="ARK Model Selection",
                 values=models,
                 initial_value=(
                     DEFAULT_ACTIVE_MODEL
@@ -407,44 +420,47 @@ async def start():
     selected_model = settings.get("ModelSelect", DEFAULT_ACTIVE_MODEL)
     cl.user_session.set("current_model", selected_model)
 
+    # Otomatik Documents Klasörü Tarayıcısını Çalıştır
+    auto_ingest_documents()
+
     await cl.Message(
         content=(
-            "🛡️ **ARK SYSTEM ONLINE (Stark HUD Protocol)**\n\n"
-            f"Aktif Model: `{selected_model}` | Sistem tam operasyonel."
+            "🛡️ **ARK SYSTEM ONLINE (Stark HUD Protocol - RAG & Memory Enabled)**\n\n"
+            f"Active Model: `{selected_model}` | System fully operational. `documents/` auto-indexed."
         ),
         author="ARK",
     ).send()
 
 
-# Kullanıcı ayarlardan modeli değiştirdiğinde tetiklenir
 @cl.on_settings_update
 async def settings_update(settings):
     selected_model = settings.get("ModelSelect", DEFAULT_ACTIVE_MODEL)
     cl.user_session.set("current_model", selected_model)
     await cl.Message(
-        content=f"⚙️ **ARK Sistem Güncellendi:** Aktif Model `{selected_model}` olarak ayarlandı.",
+        content=f"⚙️ **ARK System Updated:** Active Model set to `{selected_model}`.",
         author="ARK",
     ).send()
 
 
 # ============================================================================
-# MAIN CHAT (LLM & Komut Yürütücü)
+# MAIN CHAT (LLM, RAG, SQLite Memory & Command Router)
 # ============================================================================
 
 
 @cl.on_message
 async def main(message: cl.Message):
-    raw_text = message.content.strip()
-
-    # Aktif modeli oturumdan alalım (Eğer seçilmediyse varsayılanı kullansın)
+    raw_text = message.content.strip() if message.content else ""
     active_model = cl.user_session.get("current_model", DEFAULT_ACTIVE_MODEL)
+    thread_id = cl.user_session.get("thread_id", "default_thread")
 
-    # 1. GİZLİ KOMUT YAKALAYICI (/cmd)
+    # Read RAG status from global state instead of session
+    rag_active = GLOBAL_APP_STATE["rag_search_active"]
+
+    # 1. COMMAND HANDLER (/cmd)
     if raw_text.startswith("/cmd "):
         cmd_text = raw_text.replace("/cmd ", "", 1).lower()
         if not cmd_text:
             return
-
         config = load_config()
         commands = config.get("commands", {})
         dispatched = False
@@ -453,9 +469,7 @@ async def main(message: cl.Message):
             if any(kw in cmd_text for kw in meta.get("keywords", [])):
                 subprocess.Popen([ARK_BIN, cmd_id], cwd=BASE_DIR)
                 await cl.Message(
-                    content=(
-                        f"🚀 **Komut İcra Edildi:** {meta.get('name')} " f"(`{cmd_id}`)"
-                    ),
+                    content=f"🚀 **Command Executed:** {meta.get('name')} (`{cmd_id}`)",
                     author="ARK",
                 ).send()
                 dispatched = True
@@ -463,67 +477,88 @@ async def main(message: cl.Message):
 
         if not dispatched:
             await cl.Message(
-                content=f"❓ **Bilinmeyen Sesli Komut:** '{cmd_text}'",
+                content=f"❓ **Unrecognized Voice Command:** '{cmd_text}'",
                 author="ARK",
             ).send()
         return
 
-    # 2. DOSYA / DOKÜMAN BİLDİRİMİ
-    if message.elements:
-        for element in message.elements:
-            if isinstance(element, cl.File):
-                await cl.Message(
-                    content=(
-                        f"📄 **İÇE AKTARILIYOR:** `{element.name}`\n\n"
-                        "Local vektör tabanı hazırlanıyor..."
-                    ),
-                    author="ARK",
-                ).send()
+    # Save user message to thread-isolated SQLite history
+    save_message("user", raw_text, thread_id=thread_id)
 
-    # 3. WEB KONTROLÜ VE PROMPT ZENGİNLEŞTİRME
-    text = process_user_prompt_with_web(raw_text)
+    # 2. CONTEXT ENRICHMENT & DIAGNOSTIC LOGS
+    processed_prompt = process_user_prompt_with_rag_and_web(raw_text, rag_active)
 
-    # 4. LLM RESPONSE
+    print("[ARK DEBUG] RAG active:", rag_active)
+    print("[ARK DEBUG] Web active:", GLOBAL_APP_STATE["web_search_active"])
+    print("[ARK DEBUG] Processed prompt length:", len(processed_prompt))
+    print("[ARK DEBUG] Processed prompt preview:", repr(processed_prompt[:1500]))
+
+    recent_history = get_recent_history(limit=6, thread_id=thread_id)
+
+    messages = []
+    for hist in recent_history[:-1]:
+        messages.append({"role": hist["role"], "content": hist["content"]})
+    messages.append({"role": "user", "content": processed_prompt})
+
+    print("[ARK DEBUG] Active model:", active_model)
+    print("[ARK DEBUG] Message count:", len(messages))
+
+    # 3. LLM RESPONSE WITH STABLE STREAMING & THINKING STATUS
     msg = cl.Message(content="", author="ARK")
     await msg.send()
 
     full_response = ""
     thinking = False
+    first_token_received = False
     client = AsyncClient(host="http://127.0.0.1:11434")
 
     try:
-        print(f"[ARK LLM] Model ({active_model}) isteği gönderiliyor...")
-        stream = await client.chat(
+        response = await client.chat(
             model=active_model,
-            messages=[{"role": "user", "content": text}],
+            messages=messages,
             stream=True,
-            keep_alive=-1,
+            options={
+                "num_predict": 4096,  # Cevabın yarıda kesilmesini önlemek için maksimum çıkış token sınırı
+                "num_ctx": 8192,  # Geniş RAG metinleri ve geçmişi rahatça sığdırmak için bağlam penceresi
+                "temperature": 0.3,  # Daha net ve tutarlı yanıtlar için
+            },
         )
 
-        async for chunk in stream:
+        async for chunk in response:
             token = chunk.get("message", {}).get("content", "")
             if not token:
                 continue
+
+            if not first_token_received:
+                first_token_received = True
+                msg.content = ""
 
             full_response += token
 
             if "<think>" in token:
                 thinking = True
+                msg.content = "💭 **ARK is thinking / reasoning...**"
+                await msg.update()
                 token = re.sub(r"<think>.*", "", token, flags=re.DOTALL)
 
             if "</think>" in token:
                 thinking = False
+                msg.content = ""
+                await msg.update()
                 token = re.sub(r".*?</think>", "", token, flags=re.DOTALL)
 
             if not thinking and token:
                 await msg.stream_token(token)
 
-        print("[ARK LLM] Cevap tamamlandı.")
+        if not full_response:
+            msg.content = "[ERROR: No response generated from model]"
+            await msg.update()
 
     except Exception as e:
-        print(f"[ARK LLM HATA] {e}")
-        full_response = f"[HATA: Local LLM Bağlantı Hatası - {str(e)}]"
-        await msg.stream_token(full_response)
+        full_response = f"[ERROR: LLM Stream Error - {str(e)}]"
+        print(f"[ARK STREAM ERROR] {e}")
+        msg.content = full_response
+        await msg.update()
 
     finally:
         try:
@@ -531,10 +566,14 @@ async def main(message: cl.Message):
         except Exception:
             pass
 
-    clean_response = re.sub(
-        r"<think>.*?</think>", "", full_response, flags=re.DOTALL
-    ).strip()
+    clean_response = (
+        re.sub(r"<think>.*?</think>", "", full_response, flags=re.DOTALL).strip()
+        if "<think>" in full_response
+        else full_response
+    )
     if not clean_response:
         clean_response = full_response
 
+    save_message("assistant", clean_response, thread_id=thread_id)
+    msg.content = clean_response
     await msg.update()

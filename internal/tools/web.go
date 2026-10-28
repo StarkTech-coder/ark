@@ -18,9 +18,9 @@ type SearchResultItem struct {
 	URL   string
 }
 
-// FetchWebPage: Arama terimini (query) da hesaba katarak akıllı filtreleme yapar.
+// FetchWebPage performs intelligent filtering by taking the search query into account.
 func FetchWebPage(targetURL string) (cleanText string, err error) {
-	// URL içinden arama terimini (q=...) söküp alalım (Dinamik filtre için)
+	// Extract query keywords from the URL for dynamic filtering.
 	queryKeywords := extractQueryKeywords(targetURL)
 
 	if strings.Contains(targetURL, "duckduckgo.com") {
@@ -30,7 +30,7 @@ func FetchWebPage(targetURL string) (cleanText string, err error) {
 	return fetchSinglePageContent(targetURL, queryKeywords)
 }
 
-// URL'den arama terimini ayıklar (Örn: ?q=bursa+kahve -> ["bursa", "kahve"])
+// extractQueryKeywords extracts search terms from the URL (e.g., ?q=bursa+coffee -> ["bursa", "coffee"]).
 func extractQueryKeywords(rawURL string) []string {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -40,7 +40,7 @@ func extractQueryKeywords(rawURL string) []string {
 	if q == "" {
 		return nil
 	}
-	// Kelimelere ayır, küçük harfe çevir, çok kısa kelimeleri (ve, ile, de) atla
+	// Split into words, convert to lowercase, and skip very short words.
 	rawWords := strings.Fields(strings.ToLower(q))
 	var keywords []string
 	for _, w := range rawWords {
@@ -51,7 +51,7 @@ func extractQueryKeywords(rawURL string) []string {
 	return keywords
 }
 
-// crawlDuckDuckGoDeep: Dinamik anahtar kelimeleri alt sayfalara da taşır
+// crawlDuckDuckGoDeep propagates dynamic keywords to subpages.
 func crawlDuckDuckGoDeep(searchURL string, keywords []string) (string, error) {
 	htmlContent, err := fetchRawHTML(searchURL)
 	if err != nil {
@@ -74,7 +74,7 @@ func crawlDuckDuckGoDeep(searchURL string, keywords []string) (string, error) {
 			content, fetchErr := fetchSinglePageContent(resItem.URL, keywords)
 			if fetchErr == nil && len(content) > 100 {
 				mu.Lock()
-				deepResults = append(deepResults, fmt.Sprintf("--- KAYNAK %d: %s ---\nURL: %s\n\n%s", i+1, resItem.Title, resItem.URL, content))
+				deepResults = append(deepResults, fmt.Sprintf("--- SOURCE %d: %s ---\nURL: %s\n\n%s", i+1, resItem.Title, resItem.URL, content))
 				mu.Unlock()
 			}
 		}(idx, item)
@@ -194,7 +194,7 @@ func cleanDuckDuckGoURL(rawHref string) string {
 	return rawHref
 }
 
-// parseGenericPage: Dinamik anahtar kelime filtresi ile site çöpünü (il listeleri vb.) temizler
+// parseGenericPage cleans site clutter (such as city lists) using a dynamic keyword filter.
 func parseGenericPage(htmlStr string, keywords []string) string {
 	tagsToRemove := []string{"script", "style", "noscript", "header", "footer", "nav", "aside"}
 	for _, tag := range tagsToRemove {
@@ -219,18 +219,18 @@ func parseGenericPage(htmlStr string, keywords []string) string {
 		trimmed := cleanWhitespace(line)
 		trimmed = removeSpamDates(trimmed)
 
-		// 1. Çok kısa satırları eliyoruz
+		// 1. Filter out very short lines.
 		if len(trimmed) < 25 {
 			continue
 		}
 
-		// 2. Anlamsız il/ilçe veya menü listelerini elemek için Akıllı Dinamik Kontrol:
-		// Eğer satır içinde arama kelimelerimizden en az BİRİ geçiyorsa VEYA uzun bir cümle/adres içeriyorsa kabul et.
+		// 2. Smart dynamic check to filter out meaningless city/district or menu lists:
+		// Accept the line if it contains at least ONE of our search keywords OR contains a long sentence/address.
 		lowerLine := strings.ToLower(trimmed)
 		isRelevant := false
 
 		if len(keywords) == 0 {
-			isRelevant = true // Query yoksa direkt kabul et
+			isRelevant = true // Accept directly if no query is provided.
 		} else {
 			for _, kw := range keywords {
 				if strings.Contains(lowerLine, kw) {
@@ -240,7 +240,7 @@ func parseGenericPage(htmlStr string, keywords []string) string {
 			}
 		}
 
-		// Ekstra güvenlik: Satır içinde virgülle ayrılmış 5-6'dan fazla şehir ismi geçiyorsa (SEO footer çöpü) kesinlikle ele!
+		// Extra safety: Drop lines containing multiple city names separated by commas (SEO footer clutter).
 		if strings.Contains(lowerLine, "adana") && strings.Contains(lowerLine, "ankara") && strings.Contains(lowerLine, "izmir") {
 			continue
 		}
