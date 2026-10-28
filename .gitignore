@@ -1,42 +1,30 @@
-# ==========================================
-# ARK System - Git Ignore Rules
-# ==========================================
-
-# 1. Python & Sanal Ortam
+# Python & Virtual Environment
 venv/
 .venv/
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
 
-# 2. Vosk Ağır Modelleri, Vektör Veritabanı & Binary'ler
+# Heavy Vosk Models & Compiled Binaries
 model/
-models/
 ark_bin
-rag/chroma_db/
-rag/storage/
 
-# 3. Chainlit Kalabalık Dosyaları
-.chainlit/translations/
-
-# 4. macOS & Sistem Dosyaları
+# System & Editor Files
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-
-# 5. IDE & Editör Yapılandırmaları
 .vscode/
 .idea/
 
-# 6. Gizli Anahtarlar, Ortam Değişkenleri & Loglar
+# Environment Variables & Logs
 .env
-*.env
 *.log
 
-# 7. Node / Build Çıktıları
+# Temporary & Build Outputs
 node_modules/
 dist/
 build/
+
+# Local Documents, Vector Database & SQLite Memories
+documents/
+lancedb_data/
+ark_memory.db
+memory/

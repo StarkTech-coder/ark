@@ -5,6 +5,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let isSttActive = false;
     let isCmdActive = false;
     let isWebSearchActive = false;
+    let isRagActive = false;
 
     // ==========================================
     // 1. DRAG & DROP DOSYA SÜRÜKLEME EFEKTLERİ
@@ -96,27 +97,60 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     // ==========================================
-    // 4. MİKROFON, YILDIRIM VE WEB ARAMA BUTONLARI
+    // 4. MİKROFON, YILDIRIM, WEB VE RAG BUTONLARI (KONTROLLÜ GÜÇLENDİRİLMİŞ ENJEKSİYON)
     // ==========================================
     const injectMicButtons = () => {
-        if (document.getElementById("ark-web-btn")) return;
+        // Eğer butonlar zaten eklenmişse tekrar tetikleme
+        if (document.getElementById("ark-rag-btn")) return;
 
-        // Gönder butonunu geniş bir selector ile bulalım
-        const submitBtn = document.querySelector(
-            'button[type="submit"], button#chat-submit, button[aria-label*="send" i], button[aria-label*="Gönder" i], button:has(svg)'
-        ) || document.querySelector('textarea')?.form?.querySelector('button');
+        // Chainlit input formunu veya butonların ekleneceği ana satırı arıyoruz
+        const targetContainer = document.querySelector('form') ||
+            document.querySelector('[class*="composer"]') ||
+            document.querySelector('[class*="Composer"]') ||
+            document.querySelector('textarea')?.closest('div');
 
-        if (!submitBtn || !submitBtn.parentNode) return;
+        if (!targetContainer) return;
 
-        // Container oluştur/bul
+        // Gönder tuşunu veya input içerisindeki son buton grubunu buluyoruz
+        const sendBtn = targetContainer.querySelector('button[type="submit"]') ||
+            targetContainer.querySelector('button:last-of-type');
+
         let actionWrapper = document.getElementById("ark-action-wrapper");
         if (!actionWrapper) {
             actionWrapper = document.createElement("div");
             actionWrapper.id = "ark-action-wrapper";
-            submitBtn.parentNode.insertBefore(actionWrapper, submitBtn);
+
+            if (sendBtn && sendBtn.parentNode) {
+                sendBtn.parentNode.insertBefore(actionWrapper, sendBtn);
+            } else {
+                targetContainer.appendChild(actionWrapper);
+            }
         }
 
-        // --- 0. WEB ARAMA TOGGLE BUTONU ---
+        // --- RAG KNOWLEDGE BASE (KİTAP) BUTONU ---
+        const ragBtn = document.createElement("button");
+        ragBtn.id = "ark-rag-btn";
+        ragBtn.type = "button";
+        ragBtn.title = "ARK RAG Ders Notları / PDF Modu (Aç / Kapat)";
+        ragBtn.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"></path>
+              <path d="M6 6h10"></path>
+              <path d="M6 10h10"></path>
+            </svg>
+        `;
+        ragBtn.addEventListener("click", async () => {
+            try {
+                const res = await fetch("/ark/rag/toggle", { method: "POST" });
+                const data = await res.json();
+                isRagActive = data.active;
+                ragBtn.classList.toggle("active", isRagActive);
+                ragBtn.title = isRagActive ? "ARK RAG Ders Notları Modu: AKTİF" : "ARK RAG Ders Notları Modu: PASİF";
+            } catch (e) { console.error("RAG Toggle Error:", e); }
+        });
+        actionWrapper.appendChild(ragBtn);
+
+        // --- WEB ARAMA (KÜRE) BUTONU ---
         const webBtn = document.createElement("button");
         webBtn.id = "ark-web-btn";
         webBtn.type = "button";
@@ -133,18 +167,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 const res = await fetch("/ark/web/toggle", { method: "POST" });
                 const data = await res.json();
                 isWebSearchActive = data.active;
-                if (isWebSearchActive) {
-                    webBtn.classList.add("active");
-                    webBtn.title = "ARK Web Arama Modu: AKTİF";
-                } else {
-                    webBtn.classList.remove("active");
-                    webBtn.title = "ARK Web Arama Modu: PASİF";
-                }
+                webBtn.classList.toggle("active", isWebSearchActive);
+                webBtn.title = isWebSearchActive ? "ARK Web Arama Modu: AKTİF" : "ARK Web Arama Modu: PASİF";
             } catch (e) { console.error("Web Toggle Error:", e); }
         });
         actionWrapper.appendChild(webBtn);
 
-        // --- 1. MİKROFON TOGGLE BUTONU ---
+        // --- MİKROFON BUTONU ---
         const micBtn = document.createElement("button");
         micBtn.id = "ark-mic-btn";
         micBtn.type = "button";
@@ -159,17 +188,16 @@ document.addEventListener("DOMContentLoaded", () => {
         `;
         micBtn.addEventListener("click", async () => {
             if (isSttActive) {
-                try { await fetch("/ark/listen/stop", { method: "POST" }); } catch (e) { console.error(e); }
+                try { await fetch("/ark/listen/stop", { method: "POST" }); } catch (e) { }
                 return;
             }
             isSttActive = true;
             micBtn.classList.add("active", "animate-pulse");
-
             try {
                 const res = await fetch("/ark/listen/stt", { method: "POST" });
                 const data = await res.json();
                 if (data.text) setInputText(data.text, true);
-            } catch (e) { console.error("STT Error:", e); }
+            } catch (e) { }
             finally {
                 isSttActive = false;
                 micBtn.classList.remove("active", "animate-pulse");
@@ -177,7 +205,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         actionWrapper.appendChild(micBtn);
 
-        // --- 2. YILDIRIM / KOMUT BUTONU ---
+        // --- YILDIRIM / KOMUT BUTONU ---
         const cmdMicBtn = document.createElement("button");
         cmdMicBtn.id = "ark-cmd-mic-btn";
         cmdMicBtn.type = "button";
@@ -189,18 +217,14 @@ document.addEventListener("DOMContentLoaded", () => {
         `;
         cmdMicBtn.addEventListener("click", async () => {
             if (isCmdActive) {
-                try { await fetch("/ark/listen/stop", { method: "POST" }); } catch (e) { console.error(e); }
+                try { await fetch("/ark/listen/stop", { method: "POST" }); } catch (e) { }
                 return;
             }
             isCmdActive = true;
             cmdMicBtn.classList.add("active", "animate-pulse");
-
             try {
-                // Metin kutusuna yazmadan direkt komut servisine istek gönderir
-                const res = await fetch("/ark/listen/cmd", { method: "POST" });
-                const data = await res.json();
-                console.log("Komut Algılandı & İşlendi:", data.text);
-            } catch (e) { console.error("CMD Error:", e); }
+                await fetch("/ark/listen/cmd", { method: "POST" });
+            } catch (e) { }
             finally {
                 isCmdActive = false;
                 cmdMicBtn.classList.remove("active", "animate-pulse");
@@ -209,12 +233,14 @@ document.addEventListener("DOMContentLoaded", () => {
         actionWrapper.appendChild(cmdMicBtn);
     };
 
-    setTimeout(customizeFooterDisclaimer, 500);
-    setTimeout(injectMicButtons, 800);
-
+    // Sürekli kontrol mekanizması (DOM değişikliklerini anında yakalar)
     const observer = new MutationObserver(() => {
         customizeFooterDisclaimer();
         injectMicButtons();
     });
     observer.observe(document.body, { childList: true, subtree: true });
+
+    // İlk yükleme tetikleyicileri
+    setTimeout(customizeFooterDisclaimer, 300);
+    setTimeout(injectMicButtons, 500);
 });

@@ -1,7 +1,37 @@
 /* ==========================================================================
+   UI TAŞMA VE KAYMA DÜZELTMELERİ (OVERFLOW FIX)
+   ========================================================================== */
+
+/* Mesaj ve içerik alanlarının ekrandan taşmasını engeller */
+main [class*="message"],
+main pre,
+main code {
+    max-width: 100% !important;
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    overflow-x: auto !important;
+}
+
+/* Kod bloklarının container dışına çıkmasını önler */
+pre {
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    box-sizing: border-box !important;
+}
+
+/* Chainlit içerik kapsayıcısı genişlik güvenliği */
+[class*="message-content"],
+[class*="content"] {
+    max-width: 100% !important;
+    overflow: hidden !important;
+}
+
+
+/* ==========================================================================
    STARK HUD - BUTON AKTİF DURUMU (TOGGLE STATE)
    ========================================================================== */
 
+#ark-rag-btn.active,
 #ark-web-btn.active,
 #ark-mic-btn.active,
 #ark-cmd-mic-btn.active {
@@ -10,6 +40,26 @@
     box-shadow: 0 0 15px rgba(0, 212, 255, 0.8), inset 0 0 8px #00d4ff !important;
     color: #ffffff !important;
     transform: scale(1.1) !important;
+}
+
+#ark-rag-btn {
+    background: rgba(0, 212, 255, 0.08) !important;
+    border: 1px solid rgba(0, 212, 255, 0.25) !important;
+    color: var(--ark-cyan) !important;
+    border-radius: 50% !important;
+    width: 36px !important;
+    height: 36px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+}
+
+#ark-rag-btn:hover {
+    background: rgba(0, 212, 255, 0.25) !important;
+    box-shadow: 0 0 12px rgba(0, 212, 255, 0.5) !important;
+    transform: scale(1.05) !important;
 }
 
 /* ==========================================================================
@@ -284,6 +334,7 @@ div:has(> button[type="submit"]) {
 
 button[aria-label*="upload" i],
 button[aria-label*="attach" i],
+#ark-rag-btn,
 #ark-web-btn,
 #ark-mic-btn,
 #ark-cmd-mic-btn,
