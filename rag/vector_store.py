@@ -3,15 +3,19 @@ Local embedded LanceDB vector store controller for ARK RAG engine.
 Optimized with Local Ollama Multilingual Embeddings (Dynamic config-driven) & Detailed Terminal Debugging.
 """
 
-import os
+import asyncio
+import concurrent.futures
 import json
+import os
+import httpx
 import lancedb
 import pyarrow as pa
-import httpx
+
+from mcp_servers.router_mcp import route_query_intent
 
 # Absolute path targeting project root directory
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "lancedb_data")
+DB_PATH = os.path.join(BASE_DIR, ".lancedb")
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 # Initialize local LanceDB connection (Embedded, no Docker required)
@@ -78,6 +82,21 @@ def get_or_create_table(table_name: str = DEFAULT_TABLE):
     return db.create_table(table_name, schema=schema)
 
 
+def is_file_already_indexed(file_name: str, table_name: str) -> bool:
+    """LanceDB Arrow motoru ile Pandas'a ihtiyaç duymadan kesin kaynak kontrolü yapar."""
+    if table_name not in db.table_names():
+        return False
+    try:
+        table = db.open_table(table_name)
+        sources = (
+            table.search().select(["source"]).to_arrow().column("source").to_pylist()
+        )
+        return file_name in sources
+    except Exception as e:
+        print(f"[ARK RAG CHECK ERROR] {e}")
+        return False
+
+
 def insert_documents(
     texts: list[str],
     source_name: str = "manual",
@@ -85,8 +104,15 @@ def insert_documents(
     category: str = "general",
     is_academic: bool = False,
 ):
-    """Embeds and inserts text documents with metadata into the correct vector collection."""
+    """Embeds and inserts text documents with metadata into the correct vector collection (with skip check)."""
     target_table_name = ACADEMIC_TABLE if is_academic else DEFAULT_TABLE
+
+    if is_file_already_indexed(source_name, target_table_name):
+        print(
+            f"⏩ [ARK RAG INGEST] '{source_name}' zaten '{target_table_name}' tablosunda kayıtlı. ATlANIYOR (Skip)."
+        )
+        return
+
     table = get_or_create_table(target_table_name)
 
     print(
@@ -138,36 +164,67 @@ def smart_chunk_pdf_text(
     return chunks
 
 
+def determine_target_table(query_text: str) -> str:
+    """Ollama tabanlı akıllı MCP router'ı senkron olarak güvenle çalıştırır."""
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                target = pool.submit(
+                    asyncio.run, route_query_intent(query_text)
+                ).result()
+                return target
+        else:
+            return asyncio.run(route_query_intent(query_text))
+    except Exception as e:
+        print(f"[ARK RAG ROUTER ERROR] Fallback to 'both': {e}")
+        return "both"
+
+
 def query_context(
     query_text: str, top_k: int = 3, search_academic: bool = True
 ) -> list[str]:
-    """Retrieves relevant context snippets and prints exact matched content to terminal."""
-    target_table_name = ACADEMIC_TABLE if search_academic else DEFAULT_TABLE
+    """Akıllı Ollama RAG Router kullanarak doğru tablodan bağlam çeker ve terminale detaylı log basar."""
+    target_intent = determine_target_table(query_text)
+    print(
+        f"🎯 [ARK RAG ROUTER] Model Query Intent Target: '{target_intent}' for prompt: '{query_text[:40]}...'"
+    )
 
-    if target_table_name not in db.table_names():
-        print(
-            f"[ARK RAG QUERY] Table '{target_table_name}' does not exist yet in LanceDB."
-        )
-        return []
+    tables_to_search = []
+    if target_intent == DEFAULT_TABLE:
+        tables_to_search = [DEFAULT_TABLE]
+    elif target_intent == ACADEMIC_TABLE:
+        tables_to_search = [ACADEMIC_TABLE]
+    else:
+        tables_to_search = [ACADEMIC_TABLE, DEFAULT_TABLE]
 
-    table = db.open_table(target_table_name)
+    snippets = []
     query_vector = get_embedding(query_text)
 
     if not query_vector:
         print("[ARK RAG QUERY] Failed to generate embedding for query.")
         return []
 
-    # Execute vector search on LanceDB
-    results = table.search(query_vector).limit(top_k).to_arrow()
-    snippets = results.column("text").to_pylist()
+    for table_name in tables_to_search:
+        if table_name in db.table_names():
+            table = db.open_table(table_name)
+            results = table.search(query_vector).limit(top_k).to_arrow()
+            table_snippets = results.column("text").to_pylist()
+            snippets.extend(table_snippets)
 
-    # TERMINAL DEBUG PRINTS FOR 100% CERTAINTY
+    snippets = snippets[:top_k]
+
+    # TERMINAL DEBUG PRINTS
     print("\n" + "=" * 50)
     print(f"[ARK RAG DEBUG] Query: '{query_text}'")
-    print(f"[ARK RAG DEBUG] Target Table: '{target_table_name}'")
+    print(f"[ARK RAG DEBUG] Target Tables Searched: {tables_to_search}")
     print(f"[ARK RAG DEBUG] Retrieved Snippets Count: {len(snippets)}")
     for idx, snippet in enumerate(snippets):
-        print(f"  -> Snippet [{idx+1}]: {repr(snippet[:250])}...")
+        print(f"  -> Snippet [{idx + 1}]: {repr(snippet[:250])}...")
     print("=" * 50 + "\n")
 
     return snippets
