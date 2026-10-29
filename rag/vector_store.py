@@ -1,9 +1,10 @@
 """
 Local embedded LanceDB vector store controller for ARK RAG engine.
-Optimized with Local Ollama bge-m3 Multilingual Embeddings & Detailed Terminal Debugging.
+Optimized with Local Ollama Multilingual Embeddings (Dynamic config-driven) & Detailed Terminal Debugging.
 """
 
 import os
+import json
 import lancedb
 import pyarrow as pa
 import httpx
@@ -11,6 +12,7 @@ import httpx
 # Absolute path targeting project root directory
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "lancedb_data")
+CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 # Initialize local LanceDB connection (Embedded, no Docker required)
 db = lancedb.connect(DB_PATH)
@@ -23,23 +25,38 @@ ACADEMIC_TABLE = "academic_pdf_kb"
 EMBED_DIM = 1024
 
 
+def get_embedding_model_name() -> str:
+    """Reads the embedding model name dynamically from config.json."""
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+                return config_data.get("ai", {}).get("embedding_model", "bge-m3")
+        except Exception as e:
+            print(f"[ARK CONFIG ERROR] Failed to read embedding model from config: {e}")
+    return "bge-m3"
+
+
 def get_embedding(text: str) -> list[float]:
-    """Retrieves 1024-dim multilingual embedding vector from local Ollama bge-m3 model."""
+    """Retrieves 1024-dim multilingual embedding vector from local Ollama model specified in config."""
+    model_name = get_embedding_model_name()
     try:
         response = httpx.post(
             "http://127.0.0.1:11434/api/embeddings",
-            json={"model": "bge-m3", "prompt": text},
+            json={"model": model_name, "prompt": text},
             timeout=15.0,
         )
         if response.status_code == 200:
             return response.json().get("embedding", [])
     except Exception as e:
-        print(f"[ARK EMBEDDING ERROR] Failed to fetch bge-m3 embedding: {e}")
+        print(
+            f"[ARK EMBEDDING ERROR] Failed to fetch embedding using model '{model_name}': {e}"
+        )
     return []
 
 
 def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
-    """Batch embedding generation using local Ollama bge-m3."""
+    """Batch embedding generation using local Ollama model specified in config."""
     return [get_embedding(t) for t in texts]
 
 

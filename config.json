@@ -2,6 +2,7 @@
     "ai": {
         "provider": "ollama",
         "active_model": "qwen3:8b",
+        "embedding_model": "bge-m3",
         "models": {
             "architect": "deepseek-r1",
             "coder": "qwen2.5-coder"
@@ -22,6 +23,7 @@
                 "start work",
                 "start",
                 "workspace",
+                
                 "focus",
                 "office",
                 "coding",
