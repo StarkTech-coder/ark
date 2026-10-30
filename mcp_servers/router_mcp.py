@@ -1,7 +1,9 @@
-"""
-MCP Router Server: Uses local Ollama model (configured in config.json) to classify documents and route queries dynamically.
+"""MCP Router Server module.
+
+Uses local Ollama model (configured in config.json) to classify documents and route queries dynamically across 3 distinct knowledge bases.
 """
 
+from typing import Any
 import json
 import os
 import re
@@ -13,7 +15,7 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 
 def get_active_model() -> str:
-    """Reads active model from config.json, defaults to qwen3:8b if missing."""
+    """Read active model from config.json, defaulting to qwen3:8b if missing."""
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -24,16 +26,21 @@ def get_active_model() -> str:
     return "qwen3:8b"
 
 
-async def classify_document(file_name: str, file_content_preview: str) -> dict:
-    """Analyzes document name and text preview using the active model from config.json."""
+async def classify_document(
+    file_name: str, file_content_preview: str
+) -> dict[str, Any]:
+    """Analyze document name and text preview to classify into 3 main categories."""
     active_model = get_active_model()
 
     prompt = (
-        f"You are a document classifier.\n"
+        f"You are a document classifier for a modular RAG system.\n"
         f"Filename: {file_name}\n"
         f"Preview: {file_content_preview[:400]}\n\n"
-        f"Task: Classify this document.\n"
-        f'Output ONLY valid raw JSON with format: {{"category": "academic", "is_academic": true}} or {{"category": "general", "is_academic": false}}'
+        f"Task: Classify this document into one of these categories:\n"
+        f"1. 'university' (for lectures, academic papers, notes, study materials)\n"
+        f"2. 'code' (for programming scripts, code documentation, technical repositories)\n"
+        f"3. 'relationship' (for chat logs, Sima conversations, personal messages, relationship notes)\n"
+        f'Output ONLY valid raw JSON with format: {{"category": "university"}} or {{"category": "code"}} or {{"category": "relationship"}}'
     )
 
     try:
@@ -51,7 +58,6 @@ async def classify_document(file_name: str, file_content_preview: str) -> dict:
             )
             if response.status_code == 200:
                 raw_response = response.json().get("response", "").strip()
-
                 clean_text = re.sub(
                     r"<think>.*?</think>", "", raw_response, flags=re.DOTALL
                 ).strip()
@@ -61,48 +67,45 @@ async def classify_document(file_name: str, file_content_preview: str) -> dict:
                     ).strip()
 
                 parsed = json.loads(clean_text)
-                print(
-                    f"[MCP ROUTER] Successfully classified '{file_name}' via '{active_model}': {parsed}"
-                )
+                print(f"[MCP ROUTER] Successfully classified '{file_name}': {parsed}")
                 return parsed
-            else:
-                print(
-                    f"[MCP ROUTER WARN] Ollama returned HTTP status {response.status_code}"
-                )
-
     except Exception as e:
-        print(
-            f"[MCP ROUTER ERROR] Classification failed via ({active_model}): {type(e).__name__} {str(e)}"
-        )
+        print(f"[MCP ROUTER ERROR] Classification failed: {e}")
 
     # Heuristic Fallback
     lower_name = file_name.lower()
-    is_acad = not any(
-        kw in lower_name for kw in ["whatsapp", "chat", "sohbet", "mesaj", "gunluk"]
-    )
-    return {
-        "category": "academic" if is_acad else "general",
-        "is_academic": is_acad,
-    }
+    if any(
+        kw in lower_name
+        for kw in ["whatsapp", "chat", "sohbet", "mesaj", "relationship"]
+    ):
+        cat = "relationship"
+    elif any(
+        kw in lower_name for kw in ["py", "go", "js", "code", "script", "sdk", "api"]
+    ):
+        cat = "code"
+    else:
+        cat = "university"
+    return {"category": cat}
 
 
 async def route_query_intent(query_text: str) -> str:
-    """Determines semantically which database table the query belongs to using the Ollama model."""
+    """Determine semantically which of the 3 database tables the query belongs to."""
     active_model = get_active_model()
     client = AsyncClient(host="[http://127.0.0.1:11434](http://127.0.0.1:11434)")
 
     prompt = f"""
-You are an intelligent RAG database router (Query Router).
-Based on the user's query, you must decide which database table should be searched.
+You are an intelligent RAG database router. Based on the user query, decide which database table to search.
 
 Available Tables:
-1. "ark_knowledge_base" -> Personal chats, WhatsApp logs, daily memories, relationships, personal correspondence, etc.
-2. "academic_pdf_kb" -> Academic papers, PDF lecture notes, technical theories, books, manuals, etc.
+1. "relationship_knowledge_base" -> Chat logs with Sima, personal memories, dialogues, relationship notes.
+2. "university_knowledge_base" -> University lectures, PDF notes, academic theories, books, assignments.
+3. "code_knowledge_base" -> Source code, Go/Python projects, technical architecture, code documentation.
+4. "all" -> General queries or questions spanning multiple domains.
 
 User Query: "{query_text}"
 
-Please respond ONLY in the following JSON format (write nothing else):
-{{"target_table": "ark_knowledge_base"}} or {{"target_table": "academic_pdf_kb"}} or {{"target_table": "both"}}
+Please respond ONLY in the following JSON format:
+{{"target_table": "relationship_knowledge_base"}} or {{"target_table": "university_knowledge_base"}} or {{"target_table": "code_knowledge_base"}} or {{"target_table": "all"}}
 """
 
     try:
@@ -112,7 +115,6 @@ Please respond ONLY in the following JSON format (write nothing else):
             options={"temperature": 0.1, "num_predict": 50},
         )
         content = response.get("message", {}).get("content", "").strip()
-
         clean_content = re.sub(
             r"<think>.*?</think>", "", content, flags=re.DOTALL
         ).strip()
@@ -126,13 +128,11 @@ Please respond ONLY in the following JSON format (write nothing else):
                 clean_content.find("{") : clean_content.rfind("}") + 1
             ]
             data = json.loads(json_str)
-            target = data.get("target_table", "both")
-            print(
-                f"[MCP ROUTER] Query intent target mapped via '{active_model}' -> '{target}'"
-            )
+            target = data.get("target_table", "all")
+            print(f"[MCP ROUTER] Query intent target mapped -> '{target}'")
             return target
     except Exception as e:
-        print(f"[MCP ROUTER ERROR] Query routing failed via ({active_model}): {e}")
+        print(f"[MCP ROUTER ERROR] Query routing failed: {e}")
 
     # Heuristic Fallback
     query_lower = query_text.lower()
@@ -144,16 +144,20 @@ Please respond ONLY in the following JSON format (write nothing else):
             "sohbet",
             "mesaj",
             "konuşma",
-            "kavga",
-            "günlük",
-            "chat",
+            "relationship",
+            "ilişki",
         ]
     ):
-        return "ark_knowledge_base"
+        return "relationship_knowledge_base"
     if any(
         kw in query_lower
-        for kw in ["fotoğraf", "pdf", "ders", "akademik", "teori", "makale", "not"]
+        for kw in ["kod", "python", "go", "fonksiyon", "script", "hata", "sdk"]
     ):
-        return "academic_pdf_kb"
+        return "code_knowledge_base"
+    if any(
+        kw in query_lower
+        for kw in ["ders", "üniversite", "pdf", "not", "akademik", "teori"]
+    ):
+        return "university_knowledge_base"
 
-    return "both"
+    return "all"

@@ -1,3 +1,10 @@
+/*
+Package tools provides intent classification, tokenization, and parallel execution pipelines.
+
+This file implements input tokenization, dynamic intent parsing for crypto tickers,
+weather queries, time synchronization, and Wikipedia topic extraction, subsequently
+dispatching parallel goroutines to execute queries asynchronously.
+*/
 package tools
 
 import (
@@ -6,6 +13,7 @@ import (
 	"sync"
 )
 
+// IntentResult encapsulates parsed entities and feature flags extracted from a prompt.
 type IntentResult struct {
 	Cryptos   []string
 	Cities    []string
@@ -13,12 +21,14 @@ type IntentResult struct {
 	WikiTopic string
 }
 
+// cryptoMap maps supported cryptocurrency alias tokens to standardized ticker IDs.
 var cryptoMap = map[string]string{
 	"btc": "btc", "bitcoin": "btc",
 	"eth": "eth", "ethereum": "eth",
 	"sol": "sol", "solana": "sol",
 }
 
+// cityMap maps Turkish city names and suffix variations to canonical city names.
 var cityMap = map[string]string{
 	"istanbul": "Istanbul", "istanbula": "Istanbul", "istanbulda": "Istanbul", "istanbuldan": "Istanbul", "istanbulun": "Istanbul",
 	"bursa": "Bursa", "bursaya": "Bursa", "bursada": "Bursa", "bursadan": "Bursa", "bursanin": "Bursa",
@@ -26,16 +36,18 @@ var cityMap = map[string]string{
 	"izmir": "Izmir", "izmire": "Izmir", "izmirde": "Izmir", "izmirden": "Izmir", "izmirin": "Izmir",
 }
 
-// Tokenize: Türkçe karakterleri bozmadan noktalama işaretlerini temizler
+// Tokenize converts input text to lowercase, sanitizes punctuation marks while preserving
+// Turkish extended characters, and returns a slice of space-delimited word tokens.
 func Tokenize(text string) []string {
 	clean := strings.ToLower(text)
-	// Kesme işaretlerini ve noktalamayı boşlukla değiştir
+	// Replace punctuation and special non-alphanumeric symbols with whitespace
 	re := regexp.MustCompile(`[^\w\sğüşıöçĞÜŞİÖÇ]`)
 	clean = re.ReplaceAllString(clean, " ")
 	return strings.Fields(clean)
 }
 
-// ExtractIntents: Exact Match ile kelimeleri tarar (Substring hatası yok)
+// ExtractIntents analyzes input tokens using exact token matching to extract cryptocurrency,
+// location, time-check, and Wikipedia lookup intents without substring collision errors.
 func ExtractIntents(input string) IntentResult {
 	tokens := Tokenize(input)
 	res := IntentResult{}
@@ -50,7 +62,7 @@ func ExtractIntents(input string) IntentResult {
 		if city, ok := cityMap[t]; ok {
 			citySet[city] = true
 		}
-		if t == "saat" || t == "saati" || t == "saatini" || t == "tarih" {
+		if t == "time" || t == "date" || t == "clock" || t == "saat" || t == "tarih" {
 			res.NeedsTime = true
 		}
 	}
@@ -62,15 +74,16 @@ func ExtractIntents(input string) IntentResult {
 		res.Cities = append(res.Cities, city)
 	}
 
-	// Eğer hava kelimesi geçiyor ve şehir belirtilmediyse varsayılan Bursa
-	if strings.Contains(strings.ToLower(input), "hava") && len(res.Cities) == 0 {
+	// Default location fallback to "Bursa" if weather intent is present without explicit city
+	lowerInput := strings.ToLower(input)
+	if (strings.Contains(lowerInput, "weather") || strings.Contains(lowerInput, "hava")) && len(res.Cities) == 0 {
 		res.Cities = append(res.Cities, "Bursa")
 	}
 
-	// Wikipedia Tespiti
-	lower := strings.ToLower(input)
-	if strings.Contains(lower, "nedir") || strings.Contains(lower, "kimdir") || strings.Contains(lower, "hakkında") {
-		words := strings.Fields(lower)
+	// Wikipedia topic extraction trigger check
+	if strings.Contains(lowerInput, "what is") || strings.Contains(lowerInput, "who is") ||
+		strings.Contains(lowerInput, "nedir") || strings.Contains(lowerInput, "kimdir") || strings.Contains(lowerInput, "hakkında") {
+		words := strings.Fields(lowerInput)
 		if len(words) > 0 {
 			res.WikiTopic = words[0]
 		}
@@ -79,14 +92,15 @@ func ExtractIntents(input string) IntentResult {
 	return res
 }
 
-// ExecuteAllIntentsParallel: Tüm tool'ları eşzamanlı (Goroutine) çalıştırır
+// ExecuteAllIntentsParallel executes all extracted tool queries concurrently using Go goroutines
+// protected by sync.WaitGroup and sync.Mutex, aggregating results into a formatted multiline response.
 func ExecuteAllIntentsParallel(input string) string {
 	intents := ExtractIntents(input)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var results []string
 
-	// 1. Kripto İstekleri (Paralel)
+	// 1. Concurrent Cryptocurrency Price Queries
 	for _, coin := range intents.Cryptos {
 		wg.Add(1)
 		go func(c string) {
@@ -100,7 +114,7 @@ func ExecuteAllIntentsParallel(input string) string {
 		}(coin)
 	}
 
-	// 2. Hava Durumu İstekleri (Paralel)
+	// 2. Concurrent Weather Forecast Queries
 	for _, city := range intents.Cities {
 		wg.Add(1)
 		go func(c string) {
@@ -114,7 +128,7 @@ func ExecuteAllIntentsParallel(input string) string {
 		}(city)
 	}
 
-	// 3. Saat Bilgisi
+	// 3. World Time Synchronization Query
 	if intents.NeedsTime {
 		wg.Add(1)
 		go func() {
@@ -128,7 +142,7 @@ func ExecuteAllIntentsParallel(input string) string {
 		}()
 	}
 
-	// 4. Wikipedia İsteği (Paralel)
+	// 4. Concurrent Wikipedia Article Summary Lookup
 	if intents.WikiTopic != "" {
 		wg.Add(1)
 		go func(topic string) {

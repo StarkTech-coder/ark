@@ -1,3 +1,10 @@
+/*
+Package tools provides external API clients and web parsing utilities for the ARK system.
+
+This package handles real-time data fetching including cryptocurrency tickers,
+geocoded weather forecasts, world time synchronization, and Wikipedia summaries
+using standard Go HTTP clients with robust error handling and strict timeouts.
+*/
 package tools
 
 import (
@@ -8,9 +15,10 @@ import (
 	"time"
 )
 
+// httpClient defines a shared HTTP client with a strict 5-second timeout boundary.
 var httpClient = &http.Client{Timeout: 5 * time.Second}
 
-// FetchCryptoPrice Binance Public API üzerinden anlık USDT fiyatını çeker
+// FetchCryptoPrice queries the public Binance API to retrieve the current USDT trading price for supported coins.
 func FetchCryptoPrice(coinID string) (string, error) {
 	symbol := "BTCUSDT"
 	switch coinID {
@@ -35,7 +43,7 @@ func FetchCryptoPrice(coinID string) (string, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("kripto verisi çekilemedi (HTTP Status: %d)", resp.StatusCode)
+		return "", fmt.Errorf("failed to fetch crypto price (HTTP Status: %d)", resp.StatusCode)
 	}
 
 	var data struct {
@@ -50,19 +58,19 @@ func FetchCryptoPrice(coinID string) (string, error) {
 	var price float64
 	_, _ = fmt.Sscanf(data.Price, "%f", &price)
 
-	return fmt.Sprintf("[CANLI KRİPTO VERİSİ (Binance)]\n- Sembol: %s\n- Fiyat: $%.2f USD",
-		data.Symbol, price), nil
+	return fmt.Sprintf("[LIVE CRYPTO DATA (Binance)]\nSymbol: %s\nPrice: $%.2f USD", data.Symbol, price), nil
 }
 
-// FetchWeather Dinamik şehir parametresi alır; boş ise varsayılan olarak "Bursa" kullanır.
+// FetchWeather fetches current weather metrics for a specified city using Open-Meteo Geocoding and Forecast APIs.
+// Defaults to "Bursa" if no city parameter is provided.
 func FetchWeather(city ...string) (string, error) {
 	targetCity := "Bursa"
 	if len(city) > 0 && city[0] != "" {
 		targetCity = city[0]
 	}
 
-	// 1. Şehrin Enlem / Boylam koordinatlarını Open-Meteo Geocoding ile al
-	geoURL := fmt.Sprintf("https://geocoding-api.open-meteo.com/v1/search?name=%s&count=1&language=tr&format=json", url.QueryEscape(targetCity))
+	// 1. Resolve latitude and longitude coordinates using Open-Meteo Geocoding API
+	geoURL := fmt.Sprintf("https://geocoding-api.open-meteo.com/v1/search?name=%s&count=1&language=en&format=json", url.QueryEscape(targetCity))
 	gReq, err := http.NewRequest("GET", geoURL, nil)
 	if err != nil {
 		return "", err
@@ -71,7 +79,7 @@ func FetchWeather(city ...string) (string, error) {
 
 	gResp, err := httpClient.Do(gReq)
 	if err != nil {
-		return "", fmt.Errorf("konum koordinatı alınamadı: %v", err)
+		return "", fmt.Errorf("failed to retrieve location coordinates: %v", err)
 	}
 	defer func() { _ = gResp.Body.Close() }()
 
@@ -83,14 +91,14 @@ func FetchWeather(city ...string) (string, error) {
 		} `json:"results"`
 	}
 	if err := json.NewDecoder(gResp.Body).Decode(&geoData); err != nil || len(geoData.Results) == 0 {
-		return "", fmt.Errorf("şehir koordinatları bulunamadı: %s", targetCity)
+		return "", fmt.Errorf("city coordinates not found: %s", targetCity)
 	}
 
 	lat := geoData.Results[0].Latitude
 	lon := geoData.Results[0].Longitude
 	resolvedCity := geoData.Results[0].Name
 
-	// 2. Open-Meteo üzerinden hava durumunu çek
+	// 2. Fetch current weather forecast metrics using resolved coordinates
 	weatherURL := fmt.Sprintf("https://api.open-meteo.com/v1/forecast?latitude=%f&longitude=%f&current_weather=true", lat, lon)
 	wReq, err := http.NewRequest("GET", weatherURL, nil)
 	if err != nil {
@@ -100,7 +108,7 @@ func FetchWeather(city ...string) (string, error) {
 
 	wResp, err := httpClient.Do(wReq)
 	if err != nil {
-		return "", fmt.Errorf("hava durumu alınamadı: %v", err)
+		return "", fmt.Errorf("failed to retrieve weather metrics: %v", err)
 	}
 	defer func() { _ = wResp.Body.Close() }()
 
@@ -111,14 +119,13 @@ func FetchWeather(city ...string) (string, error) {
 		} `json:"current_weather"`
 	}
 	if err := json.NewDecoder(wResp.Body).Decode(&wData); err != nil {
-		return "", fmt.Errorf("hava verisi okunamadı: %v", err)
+		return "", fmt.Errorf("failed to parse weather payload: %v", err)
 	}
 
-	return fmt.Sprintf("[CANLI HAVA DURUMU]\n- Konum/Şehir: %s\n- Sıcaklık: %.1f°C\n- Rüzgar Hızı: %.1f km/h",
-		resolvedCity, wData.CurrentWeather.Temperature, wData.CurrentWeather.Windspeed), nil
+	return fmt.Sprintf("[LIVE WEATHER DATA]\nLocation: %s\nTemperature: %.1f°C\nWind Speed: %.1f km/h", resolvedCity, wData.CurrentWeather.Temperature, wData.CurrentWeather.Windspeed), nil
 }
 
-// FetchWorldTime Sunucudan bağımsız olarak kesin zaman bilgisini alır
+// FetchWorldTime retrieves precise time and date information independently of local system clock settings.
 func FetchWorldTime() (string, error) {
 	apiURL := "https://timeapi.io/api/time/current/zone?timeZone=Europe/Istanbul"
 
@@ -143,13 +150,13 @@ func FetchWorldTime() (string, error) {
 		return "", err
 	}
 
-	return fmt.Sprintf("[CANLI SİSTEM SAATİ]\n- Zaman Dilimi: %s\n- Tarih: %s\n- Saat: %s", tData.TimeZone, tData.Date, tData.Time), nil
+	return fmt.Sprintf("[LIVE SYSTEM TIME]\nTimezone: %s\nDate: %s\nTime: %s", tData.TimeZone, tData.Date, tData.Time), nil
 }
 
-// FetchWikipediaSummary Türkçe Wikipedia üzerinden aranan başlığın resmi tanım özetini getirir
+// FetchWikipediaSummary queries the Wikipedia REST API to retrieve an official summary definition for a given topic query.
 func FetchWikipediaSummary(query string) (string, error) {
 	escapedQuery := url.PathEscape(query)
-	wikiURL := fmt.Sprintf("https://tr.wikipedia.org/api/rest_v1/page/summary/%s", escapedQuery)
+	wikiURL := fmt.Sprintf("https://en.wikipedia.org/api/rest_v1/page/summary/%s", escapedQuery)
 
 	req, err := http.NewRequest("GET", wikiURL, nil)
 	if err != nil {
@@ -164,7 +171,7 @@ func FetchWikipediaSummary(query string) (string, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("wikipedia maddesi bulunamadı")
+		return "", fmt.Errorf("wikipedia article not found")
 	}
 
 	var wData struct {
@@ -175,5 +182,5 @@ func FetchWikipediaSummary(query string) (string, error) {
 		return "", err
 	}
 
-	return fmt.Sprintf("[WIKIPEDIA TR - %s]\n%s", wData.Title, wData.Extract), nil
+	return fmt.Sprintf("[WIKIPEDIA SUMMARY - %s]\n%s", wData.Title, wData.Extract), nil
 }
