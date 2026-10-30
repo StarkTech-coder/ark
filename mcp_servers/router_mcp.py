@@ -1,6 +1,8 @@
 """MCP Router Server module.
 
-Uses local Ollama model (configured in config.json) to classify documents and route queries dynamically across 3 distinct knowledge bases.
+Uses local Ollama model (configured in config.json) to classify documents,
+route queries dynamically across 3 distinct knowledge bases, and optimize/translate
+web search queries into high-precision English search terms.
 """
 
 from typing import Any
@@ -161,3 +163,47 @@ Please respond ONLY in the following JSON format:
         return "university_knowledge_base"
 
     return "all"
+
+
+async def optimize_search_query(user_query: str) -> str:
+    """Translate and optimize user query into an concise English web search term.
+
+    Args:
+        user_query: Raw user prompt in Turkish or any other language.
+
+    Returns:
+        Clean, English optimized web search string.
+    """
+    active_model = get_active_model()
+    client = AsyncClient(host="http://127.0.0.1:11434")
+
+    prompt = (
+        "You are a web search query translator and optimizer.\n"
+        "Convert the user prompt into an optimal, clean, short English web search query.\n"
+        "Do NOT output explanations, quotes, or markdown tags.\n"
+        "Output ONLY the plain English search keywords.\n\n"
+        f"User Prompt: {user_query}\n"
+        "Optimized English Search Query:"
+    )
+
+    try:
+        response = await client.generate(
+            model=active_model,
+            prompt=prompt,
+            options={"temperature": 0.1, "num_predict": 25},
+        )
+        raw_response = response.get("response", "").strip()
+        clean_query = re.sub(
+            r"<think>.*?</think>", "", raw_response, flags=re.DOTALL
+        ).strip()
+        clean_query = clean_query.replace('"', "").replace("'", "").strip()
+
+        if clean_query:
+            print(
+                f"[ARK QUERY OPTIMIZER] Original: '{user_query}' -> Optimized EN: '{clean_query}'"
+            )
+            return clean_query
+    except Exception as e:
+        print(f"[ARK QUERY OPTIMIZER ERROR] Failed to optimize query: {e}")
+
+    return user_query
