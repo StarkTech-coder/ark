@@ -28,3 +28,4 @@ documents/
 lancedb_data/
 ark_memory.db
 memory/
+.lancedb/
