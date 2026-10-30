@@ -1,19 +1,24 @@
-"""
-MCP LanceDB Server: Handles embedding generation, chunking, and vector insertion.
+"""MCP LanceDB Server module.
+
+Handles embedding generation, chunking, and vector insertion across 3 isolated knowledge bases.
 """
 
+from typing import Any
 from rag.vector_store import insert_documents, smart_chunk_pdf_text
 
 
-def process_and_store_document(file_content: str, file_name: str, is_academic: bool):
-    """Chunks document content and inserts it into the appropriate LanceDB table."""
+def process_and_store_document(
+    file_content: str, file_name: str, category: str
+) -> bool:
+    """Chunk document content and insert it into the appropriate category-mapped LanceDB table."""
     try:
         chunks = smart_chunk_pdf_text(file_content, source_name=file_name)
         if chunks:
             texts = [c["text"] for c in chunks]
-            insert_documents(texts, source_name=file_name, is_academic=is_academic)
+            # category: 'relationship', 'university', or 'code'
+            insert_documents(texts, source_name=file_name, category=category)
             print(
-                f"[MCP LANCEDB] Successfully stored chunks for '{file_name}' (Academic: {is_academic})"
+                f"[MCP LANCEDB] Successfully stored chunks for '{file_name}' under category/table: '{category}'"
             )
             return True
     except Exception as e:

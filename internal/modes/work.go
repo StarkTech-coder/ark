@@ -48,3 +48,4 @@ func RunWorkMode() {
 	// Final audio feedback signaling completion
 	actions.PlaySystemSound("ark_finish.wav")
 }
+ 

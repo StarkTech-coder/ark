@@ -1,8 +1,9 @@
-"""
-ARK Chainlit user interface & offline audio controller with LanceDB RAG & SQLite Memory.
+"""ARK Chainlit User Interface & Offline Audio Controller with LanceDB RAG & SQLite Memory.
+
 Optimized for M2 MacBook Air (16 GB RAM) with global state synchronization and debug logging.
 """
 
+from typing import Any
 import asyncio
 import json
 import os
@@ -22,14 +23,20 @@ import pyaudio
 from vosk import KaldiRecognizer, Model
 
 from memory.db import get_recent_history, save_message
-from rag.vector_store import query_context
+from rag.vector_store import (
+    CODE_TABLE,
+    UNIVERSITY_TABLE,
+    RELATIONSHIP_TABLE,
+    is_file_already_indexed,
+    query_context,
+)
 
 from mcp_servers.fs_mcp import read_document_content, scan_documents_directory
 from mcp_servers.lancedb_mcp import process_and_store_document
 from mcp_servers.router_mcp import classify_document
 
 # ============================================================================
-# PATHS & CONFIG
+# PATHS & CONFIGURATION
 # ============================================================================
 
 BASE_DIR = os.path.expanduser("~/Desktop/ark")
@@ -41,8 +48,8 @@ MODEL_TR_PATH = os.path.join(BASE_DIR, "model_tr")
 ARK_BIN = os.path.join(BASE_DIR, "ark_bin")
 
 
-def load_config() -> dict:
-    """Loads and returns application configuration from config.json."""
+def load_config() -> dict[str, Any]:
+    """Load and return application configuration from config.json."""
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -88,7 +95,7 @@ GLOBAL_APP_STATE = {
 
 
 def auto_ingest_documents() -> None:
-    """Scans the documents directory, classifies them via MCP, and indexes them into LanceDB."""
+    """Scan documents subdirectories, respect category mappings, and index into 3-tier LanceDB."""
     all_files = scan_documents_directory(DOCS_DIR)
     if not all_files:
         print("[ARK DOCS INGEST] No documents found to analyze.")
@@ -98,8 +105,26 @@ def auto_ingest_documents() -> None:
         f"[ARK DOCS INGEST] Found {len(all_files)} documents to analyze and ingest via MCP."
     )
 
-    for file_path in all_files:
+    for item in all_files:
+        file_path = item["path"]
+        folder_category = item["category"]  # 'relationship', 'university', or 'code'
         file_name = os.path.basename(file_path)
+
+        # Resolve target table mapping based on folder category
+        if folder_category == "relationship":
+            target_table = RELATIONSHIP_TABLE
+        elif folder_category == "code":
+            target_table = CODE_TABLE
+        else:
+            target_table = UNIVERSITY_TABLE
+
+        # FAST SKIP: Skip processing if the file is already indexed in the target vector table
+        if is_file_already_indexed(file_name, target_table):
+            print(
+                f"⏩ [ARK FAST SKIP] '{file_name}' is already indexed in '{target_table}'. Skipping vision/text analysis."
+            )
+            continue
+
         try:
             file_content = read_document_content(file_path)
             if not file_content.strip():
@@ -107,20 +132,15 @@ def auto_ingest_documents() -> None:
 
             time.sleep(1)
 
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            classification = loop.run_until_complete(
-                classify_document(file_name, file_content[:500])
-            )
-            loop.close()
-
-            is_academic = classification.get("is_academic", True)
-            target_table = "academic_pdf_kb" if is_academic else "ark_knowledge_base"
+            # Folder hierarchy takes deterministic precedence for category mapping
+            target_category = folder_category
             print(
-                f"[ARK MCP SMART ROUTER] File '{file_name}' classified as -> Table: '{target_table}' (Academic: {is_academic})"
+                f"[ARK MCP SMART ROUTER] File '{file_name}' mapped to category -> '{target_category}' via folder path."
             )
 
-            process_and_store_document(file_content, file_name, is_academic)
+            process_and_store_document(
+                file_content, file_name, category=target_category
+            )
 
         except Exception as e:
             print(f"[ARK DOCS INGEST ERROR] {file_name}: {e}")
@@ -132,7 +152,7 @@ def auto_ingest_documents() -> None:
 
 
 def call_ark_api(service: str, param: str = "") -> str:
-    """Executes external Go ark_bin CLI commands with optional parameters."""
+    """Execute external Go ark_bin CLI commands with optional parameters."""
     try:
         cmd = [ARK_BIN, service]
         if param:
@@ -146,7 +166,7 @@ def call_ark_api(service: str, param: str = "") -> str:
 
 
 def fetch_web_content(url: str) -> str:
-    """Scrapes target URL content utilizing the Go scraping module."""
+    """Scrape target URL content utilizing the Go web scraping module."""
     try:
         result = subprocess.run(
             [ARK_BIN, "web", url],
@@ -173,13 +193,13 @@ def fetch_web_content(url: str) -> str:
 
 
 def clean_search_query(user_prompt: str) -> str:
-    """Sanitizes user prompt strings for search query formatting."""
+    """Sanitize user prompt strings for search query formatting."""
     clean_prompt = re.sub(r'["\']', "", user_prompt)
     return " ".join(clean_prompt.split())
 
 
 def process_user_prompt_with_rag_and_web(user_prompt: str, rag_active: bool) -> str:
-    """Enriches user prompts with retrieved RAG snippets, web data, and pipeline context."""
+    """Enrich user prompts with retrieved RAG snippets, web data, and pipeline context."""
     web_search_active = GLOBAL_APP_STATE.get("web_search_active", False)
     collected_contexts = []
 
@@ -189,7 +209,7 @@ def process_user_prompt_with_rag_and_web(user_prompt: str, rag_active: bool) -> 
 
     if rag_active:
         try:
-            rag_snippets = query_context(user_prompt, top_k=3, search_academic=True)
+            rag_snippets = query_context(user_prompt, top_k=3)
             print(f"[ARK RAG] Retrieved snippets count: {len(rag_snippets)}")
             if rag_snippets:
                 rag_text = "\n".join(rag_snippets)
@@ -203,7 +223,7 @@ def process_user_prompt_with_rag_and_web(user_prompt: str, rag_active: bool) -> 
         go_intent_data = call_ark_api("pipeline", user_prompt)
         if (
             go_intent_data
-            and "HATA" not in go_intent_data
+            and "ERROR" not in go_intent_data
             and len(go_intent_data.strip()) > 0
         ):
             collected_contexts.append(go_intent_data)
@@ -224,8 +244,8 @@ def process_user_prompt_with_rag_and_web(user_prompt: str, rag_active: bool) -> 
         scraped_text = fetch_web_content(target_url)
         if (
             scraped_text
-            and "HATA" not in scraped_text
-            and scraped_text != "[Web içeriği boş veya kazınamadı]"
+            and "ERROR" not in scraped_text
+            and scraped_text != "[Web content is empty or could not be scraped]"
         ):
             collected_contexts.append(f"[WEB RESULTS]\n{scraped_text}")
 
@@ -234,29 +254,31 @@ def process_user_prompt_with_rag_and_web(user_prompt: str, rag_active: bool) -> 
             collected_contexts
         )
         system_instruction = (
-            "[STARK HUD PROTOCOL - CONTEXT INJECTION]\n"
-            "- Below is retrieved knowledge from local RAG database, live services, and web results.\n"
-            "- RULE 1: Answer the user's request primarily based on this provided context.\n"
-            "- RULE 2: If specific facts are missing in the context, do not hallucinate."
+            "[STARK HUD PROTOCOL - PERSONAL ASSISTANT INJECTION]\n"
+            "- You are JARVIS/ARK, the personal artificial intelligence assistant of Tony Stark (Berk).\n"
+            "- The user's name is Berk (keep this in mind and address him with smart, visionary nuance).\n"
+            "- Below is contextual data retrieved from the local RAG database, live services, and web results.\n"
+            "- RULE 1: Base your answers strictly on this context, but never sound like a rigid, formal robot; maintain a warm, fluent, intelligent, and conversational tone.\n"
+            "- RULE 2: Never introduce missing or fabricated information not present in the context; do not hallucinate."
         )
         return (
             f"{system_instruction}\n\n{combined_context}\n\nUser Request: {user_prompt}"
         )
 
-    pasif_instruction = (
+    fallback_instruction = (
         "[SYSTEM INSTRUCTION]\n"
-        "No external or RAG context was retrieved. Answer directly using your internal knowledge base."
+        "You are Berk's (Tony Stark) private local AI system. No external or RAG context was found. Respond directly using your internal knowledge with a warm, fluent tone fitting your genius/billionaire/philanthropist persona."
     )
-    return f"{pasif_instruction}\n\nUser Request: {user_prompt}"
+    return f"{fallback_instruction}\n\nUser Request: {user_prompt}"
 
 
 # ============================================================================
-# VOSK MODELS
+# VOSK SPEECH RECOGNITION MODELS
 # ============================================================================
 
 
 def get_vosk_model():
-    """Initializes and returns the default Vosk speech recognition model."""
+    """Initialize and return the default Vosk speech recognition model."""
     global _vosk_model
     if _vosk_model is None and os.path.exists(MODEL_PATH):
         _vosk_model = Model(MODEL_PATH)
@@ -264,7 +286,7 @@ def get_vosk_model():
 
 
 def get_vosk_model_tr():
-    """Initializes and returns the Turkish Vosk speech recognition model."""
+    """Initialize and return the Turkish Vosk speech recognition model."""
     global _vosk_model_tr
     if _vosk_model_tr is None and os.path.exists(MODEL_TR_PATH):
         _vosk_model_tr = Model(MODEL_TR_PATH)
@@ -272,7 +294,7 @@ def get_vosk_model_tr():
 
 
 def record_and_recognize(phrase_limit_sec: int = 15, use_tr: bool = False) -> str:
-    """Captures microphone audio stream and performs offline speech-to-text recognition."""
+    """Capture microphone audio stream and perform offline speech-to-text recognition."""
     global stop_event
     stop_event.clear()
     model = get_vosk_model_tr() if use_tr else get_vosk_model()
@@ -345,7 +367,7 @@ async def api_listen_cmd():
     cmd_text = await loop.run_in_executor(None, record_and_recognize, 6, False)
     cmd_text_clean = cmd_text.strip().lower()
 
-    if not cmd_text_clean or "hata" in cmd_text_clean:
+    if not cmd_text_clean or "error" in cmd_text_clean or "hata" in cmd_text_clean:
         return JSONResponse({"text": cmd_text, "status": "no_input"})
 
     config = load_config()
@@ -392,7 +414,7 @@ async def api_rag_toggle():
 
 @cl.on_chat_start
 async def start() -> None:
-    """Initializes Chainlit chat session, fetches available local models, and renders settings."""
+    """Initialize Chainlit chat session, fetch available local models, and render settings."""
     thread_id = cl.user_session.get("id", "default_thread")
     cl.user_session.set("thread_id", thread_id)
 
@@ -447,8 +469,8 @@ async def start() -> None:
 
 
 @cl.on_settings_update
-async def settings_update(settings: dict) -> None:
-    """Handles runtime model updates from Chainlit chat settings panel."""
+async def settings_update(settings: dict[str, Any]) -> None:
+    """Handle runtime model updates from Chainlit chat settings panel."""
     selected_model = settings.get("ModelSelect", DEFAULT_ACTIVE_MODEL)
     cl.user_session.set("current_model", selected_model)
     await cl.Message(
@@ -472,20 +494,24 @@ async def main(message: cl.Message) -> None:
     rag_active = GLOBAL_APP_STATE["rag_search_active"]
 
     if raw_text == "/ingest":
-        msg = cl.Message(
+        await cl.Message(
             content="🔄 **[ARK MCP] Starting manual document ingestion...**",
             author="ARK",
-        )
-        await msg.send()
+        ).send()
 
         try:
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, auto_ingest_documents)
-            msg.content = "✅ **[ARK MCP] Document ingestion complete!** All files have been successfully vectorized and indexed."
-        except Exception as e:
-            msg.content = f"❌ **[ARK MCP ERROR] Ingestion failed:** {str(e)}"
 
-        await msg.update()
+            await cl.Message(
+                content="✅ **[ARK MCP] Document ingestion complete!** All files have been successfully vectorized and indexed.",
+                author="ARK",
+            ).send()
+        except Exception as e:
+            await cl.Message(
+                content=f"❌ **[ARK MCP ERROR] Ingestion failed:** {str(e)}",
+                author="ARK",
+            ).send()
         return
 
     if raw_text.startswith("/cmd "):
@@ -594,14 +620,14 @@ async def main(message: cl.Message) -> None:
         except Exception:
             pass
 
-    clean_response = (
+    clean_processing_response = (
         re.sub(r"<think>.*?</think>", "", full_response, flags=re.DOTALL).strip()
         if "<think>" in full_response
         else full_response
     )
-    if not clean_response:
-        clean_response = full_response
+    if not clean_processing_response:
+        clean_processing_response = full_response
 
-    save_message("assistant", clean_response, thread_id=thread_id)
-    msg.content = clean_response
+    save_message("assistant", clean_processing_response, thread_id=thread_id)
+    msg.content = clean_processing_response
     await msg.update()

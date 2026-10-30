@@ -1,3 +1,10 @@
+/*
+Package tools provides web crawling, HTML parsing, and intelligent content filtering.
+
+This file implements robust web scraping capabilities, including DuckDuckGo deep search crawling,
+parallel subpage fetching, HTML element sanitization, and keyword-based content filtering
+to extract clean, relevant plain-text payloads for downstream LLM ingestion.
+*/
 package tools
 
 import (
@@ -13,14 +20,15 @@ import (
 	"golang.org/x/net/html"
 )
 
+// SearchResultItem represents an individual web search result containing its title and target URL.
 type SearchResultItem struct {
 	Title string
 	URL   string
 }
 
-// FetchWebPage performs intelligent filtering by taking the search query into account.
+// FetchWebPage performs intelligent web content extraction and filtering using dynamic search query keywords.
 func FetchWebPage(targetURL string) (cleanText string, err error) {
-	// Extract query keywords from the URL for dynamic filtering.
+	// Extract search query keywords from the target URL parameters for dynamic filtering.
 	queryKeywords := extractQueryKeywords(targetURL)
 
 	if strings.Contains(targetURL, "duckduckgo.com") {
@@ -30,7 +38,7 @@ func FetchWebPage(targetURL string) (cleanText string, err error) {
 	return fetchSinglePageContent(targetURL, queryKeywords)
 }
 
-// extractQueryKeywords extracts search terms from the URL (e.g., ?q=bursa+coffee -> ["bursa", "coffee"]).
+// extractQueryKeywords extracts and sanitizes search terms from the URL query string (e.g., ?q=bursa+coffee -> ["bursa", "coffee"]).
 func extractQueryKeywords(rawURL string) []string {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -40,7 +48,7 @@ func extractQueryKeywords(rawURL string) []string {
 	if q == "" {
 		return nil
 	}
-	// Split into words, convert to lowercase, and skip very short words.
+	// Split into words, convert to lowercase, and skip extremely short words.
 	rawWords := strings.Fields(strings.ToLower(q))
 	var keywords []string
 	for _, w := range rawWords {
@@ -51,7 +59,7 @@ func extractQueryKeywords(rawURL string) []string {
 	return keywords
 }
 
-// crawlDuckDuckGoDeep propagates dynamic keywords to subpages.
+// crawlDuckDuckGoDeep crawls DuckDuckGo search results and concurrently propagates query keywords to top subpages.
 func crawlDuckDuckGoDeep(searchURL string, keywords []string) (string, error) {
 	htmlContent, err := fetchRawHTML(searchURL)
 	if err != nil {
@@ -94,6 +102,7 @@ func crawlDuckDuckGoDeep(searchURL string, keywords []string) (string, error) {
 	return combined, nil
 }
 
+// fetchSinglePageContent downloads and parses raw HTML content for a single target URL.
 func fetchSinglePageContent(targetURL string, keywords []string) (string, error) {
 	htmlContent, err := fetchRawHTML(targetURL)
 	if err != nil {
@@ -102,6 +111,7 @@ func fetchSinglePageContent(targetURL string, keywords []string) (string, error)
 	return parseGenericPage(htmlContent, keywords), nil
 }
 
+// fetchRawHTML executes an HTTP GET request with a strict timeout and standard desktop User-Agent headers.
 func fetchRawHTML(targetURL string) (string, error) {
 	client := &http.Client{Timeout: 8 * time.Second}
 	req, err := http.NewRequest("GET", targetURL, nil)
@@ -110,7 +120,7 @@ func fetchRawHTML(targetURL string) (string, error) {
 	}
 
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-	req.Header.Set("Accept-Language", "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9,tr-TR;q=0.8,tr;q=0.7")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -121,7 +131,7 @@ func fetchRawHTML(targetURL string) (string, error) {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+		return "", fmt.Errorf("HTTP error status code: %d", resp.StatusCode)
 	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
@@ -132,6 +142,7 @@ func fetchRawHTML(targetURL string) (string, error) {
 	return string(bodyBytes), nil
 }
 
+// parseDuckDuckGoLinks parses HTML DOM nodes to extract clean search result links up to the specified limit.
 func parseDuckDuckGoLinks(htmlStr string, limit int) []SearchResultItem {
 	doc, err := html.Parse(strings.NewReader(htmlStr))
 	if err != nil {
@@ -176,6 +187,7 @@ func parseDuckDuckGoLinks(htmlStr string, limit int) []SearchResultItem {
 	return items
 }
 
+// cleanDuckDuckGoURL unwraps and cleans redirected target URLs extracted from DuckDuckGo anchor tags.
 func cleanDuckDuckGoURL(rawHref string) string {
 	if strings.HasPrefix(rawHref, "//") {
 		rawHref = "https:" + rawHref
@@ -194,7 +206,7 @@ func cleanDuckDuckGoURL(rawHref string) string {
 	return rawHref
 }
 
-// parseGenericPage cleans site clutter (such as city lists) using a dynamic keyword filter.
+// parseGenericPage strips clutter tags, decodes HTML entities, and filters lines dynamically using query keywords.
 func parseGenericPage(htmlStr string, keywords []string) string {
 	tagsToRemove := []string{"script", "style", "noscript", "header", "footer", "nav", "aside"}
 	for _, tag := range tagsToRemove {
@@ -219,12 +231,12 @@ func parseGenericPage(htmlStr string, keywords []string) string {
 		trimmed := cleanWhitespace(line)
 		trimmed = removeSpamDates(trimmed)
 
-		// 1. Filter out very short lines.
+		// 1. Filter out extremely short lines.
 		if len(trimmed) < 25 {
 			continue
 		}
 
-		// 2. Smart dynamic check to filter out meaningless city/district or menu lists:
+		// 2. Smart dynamic check to filter out meaningless menu/footer lists:
 		// Accept the line if it contains at least ONE of our search keywords OR contains a long sentence/address.
 		lowerLine := strings.ToLower(trimmed)
 		isRelevant := false
@@ -240,7 +252,7 @@ func parseGenericPage(htmlStr string, keywords []string) string {
 			}
 		}
 
-		// Extra safety: Drop lines containing multiple city names separated by commas (SEO footer clutter).
+		// Extra safety: Drop lines containing multiple common city names separated by commas (SEO footer clutter).
 		if strings.Contains(lowerLine, "adana") && strings.Contains(lowerLine, "ankara") && strings.Contains(lowerLine, "izmir") {
 			continue
 		}
@@ -253,6 +265,7 @@ func parseGenericPage(htmlStr string, keywords []string) string {
 	return strings.Join(cleanedLines, "\n")
 }
 
+// extractNodeText recursively extracts plain text content from HTML DOM nodes.
 func extractNodeText(n *html.Node) string {
 	if n.Type == html.TextNode {
 		return n.Data
@@ -264,11 +277,13 @@ func extractNodeText(n *html.Node) string {
 	return text
 }
 
+// removeSpamDates strips generic date strings and timestamps commonly found in blog/news comment sections.
 func removeSpamDates(s string) string {
 	reTrDate := regexp.MustCompile(`(?i)\d{1,2}\s+(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\s+\d{4}(\s+\d{2}:\d{2})?`)
 	return reTrDate.ReplaceAllString(s, " ")
 }
 
+// cleanWhitespace normalizes consecutive whitespace characters and trims outer padding.
 func cleanWhitespace(s string) string {
 	reSpace := regexp.MustCompile(`\s+`)
 	return strings.TrimSpace(reSpace.ReplaceAllString(s, " "))
