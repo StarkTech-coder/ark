@@ -4,48 +4,61 @@ import (
 	"ark/internal/actions"
 )
 
-// RunWorkMode initializes the primary development environment across three macOS Spaces.
-// It uses fixed, deterministic delays to avoid infinite polling loops and CPU spikes.
+// RunWorkMode initializes the primary development environment across four macOS Spaces.
+// Layout:
+//   - Space 1: Media & Web Browsing (Spotify, Google Chrome)
+//   - Space 2: Core IDE & Documentation (Visual Studio Code, Notes)
+//   - Space 3: Research Environment (Safari)
+//   - Space 4: Terminal & Servers (Ollama, Chainlit)
 func RunWorkMode() {
-	// 1. Reset focus to the primary workspace (Space 1)
 	actions.GoToFirstSpace()
+	actions.RunCommand(`delay 0.5`)
 
-	// --- SPACE 1: Media & Web Browsing ---
-	// Activate Spotify and initiate playback immediately
+	// Space 1: Media & Web Browsing
 	actions.RunCommand(`tell application "Spotify" to activate`)
-	actions.RunCommand(`delay 0.5`)
+	actions.RunCommand(`delay 0.4`)
 	actions.RunCommand(`tell application "Spotify" to play track "spotify:playlist:1CD9FdYqz6fNRVbw45vLNy"`)
-
-	// Launch Chrome and open Gmail directly (Chrome will open restored tabs automatically via browser settings)
-	actions.RunCommand(`delay 0.5`)
+	actions.RunCommand(`delay 0.4`)
 	actions.RunCommand(`tell application "Google Chrome" to activate`)
 	actions.RunCommand(`tell application "Google Chrome" to open location "https://mail.google.com"`)
-
-	// Buffer delay for Space 1 operations
-	actions.RunCommand(`delay 0.8`)
-
-	// --- SPACE 2: Research Environment ---
-	// Transition to Space 2
-	actions.SwitchSpaceRight()
-
-	// Launch and force Safari to frontmost focus safely
-	actions.RunCommand(`
-		tell application "Safari"
-			activate
-			reopen
-		end tell
-	`)
-	// Deterministic delay for Safari UI to render on Space 2
 	actions.RunCommand(`delay 1.0`)
 
-	// --- SPACE 3: Core IDE & Documentation ---
-	// Transition to Space 3 and initialize development workspace
+	// Space 2: Core IDE & Documentation
 	actions.SwitchSpaceRight()
+	actions.RunCommand(`delay 1.2`)
 	actions.RunCommand(`tell application "Visual Studio Code" to activate`)
 	actions.RunCommand(`delay 0.6`)
 	actions.RunCommand(`tell application "Notes" to activate`)
+	actions.RunCommand(`delay 1.0`)
 
-	// Final audio feedback signaling completion
+	// Space 3: Research Environment
+	actions.SwitchSpaceRight()
+	actions.RunCommand(`delay 1.2`)
+	actions.RunCommand(`
+		tell application "Safari"
+			reopen
+			activate
+		end tell
+	`)
+	actions.RunCommand(`delay 2.0`)
+
+	// Space 4: Terminal & Servers
+	actions.SwitchSpaceRight()
+	actions.RunCommand(`delay 1.2`)
+	actions.RunCommand(`
+		tell application "Terminal"
+			activate
+			do script "cd ~/Desktop/ark && source venv/bin/activate && ollama serve"
+		end tell
+	`)
+	actions.RunCommand(`delay 3.0`)
+	actions.RunCommand(`
+		tell application "Terminal"
+			activate
+			do script "cd ~/Desktop/ark && source venv/bin/activate && venv/bin/chainlit run chat_ui.py"
+		end tell
+	`)
+	actions.RunCommand(`delay 1.0`)
+
 	actions.PlaySystemSound("ark_finish.wav")
 }
- 
