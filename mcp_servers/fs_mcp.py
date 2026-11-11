@@ -8,26 +8,21 @@ from typing import Any
 import base64
 import csv
 import glob
-import json as json_lib
+import json
 import os
 import docx
 import httpx
 import pypdf
 
-BASE_DIR = os.path.expanduser("~/Desktop/ark")
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+from llm.config import get_ollama_host, get_vision_model
+from runtime.paths import get_runtime_paths
+
+BASE_DIR = str(get_runtime_paths().project_root)
 
 
 def get_vision_model_name() -> str:
     """Read vision model name from config.json dynamically, defaulting to llava if missing."""
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                data = json_lib.load(f)
-                return data.get("ai", {}).get("vision_model", "llava")
-        except Exception as e:
-            print(f"[CONFIG ERROR] Failed to read vision model from config: {e}")
-    return "llava"
+    return get_vision_model()
 
 
 def scan_documents_directory(docs_dir: str) -> list[dict[str, str]]:
@@ -80,12 +75,13 @@ def scan_documents_directory(docs_dir: str) -> list[dict[str, str]]:
 def describe_image_locally(image_path: str) -> str:
     """Send image to local Ollama vision model (e.g., llava) to generate a detailed text description."""
     model_name = get_vision_model_name()
+    ollama_host = get_ollama_host()
     try:
         with open(image_path, "rb") as img_file:
             encoded_image = base64.b64encode(img_file.read()).decode("utf-8")
 
         response = httpx.post(
-            "http://127.0.0.1:11434/api/generate",
+            f"{ollama_host}/api/generate",
             json={
                 "model": model_name,
                 "prompt": (
@@ -125,8 +121,8 @@ def read_document_content(file_path: str) -> str:
 
         elif file_ext == ".json":
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                data = json_lib.load(f)
-                file_content = json_lib.dumps(data, indent=2, ensure_ascii=False)
+                data = json.load(f)
+                file_content = json.dumps(data, indent=2, ensure_ascii=False)
 
         elif file_ext == ".csv":
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:

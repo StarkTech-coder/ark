@@ -9,18 +9,30 @@ the target binary payload (ark_bin).
 """
 
 from typing import Any
-import json
+import logging
 import os
 import subprocess
 from pynput import keyboard
-import speech_recognition as sr
-from vosk import KaldiRecognizer, Model
+
+from runtime.config import load_runtime_config
+from runtime.logging_config import configure_logging
+from runtime.paths import get_runtime_paths
+from runtime.platform_ops import play_audio_file
+from runtime.voice import (
+    VoiceMicrophoneError,
+    VoiceModelNotAvailableError,
+    VoiceRecognitionManager,
+    VoiceSessionBusyError,
+)
 
 # --- Dynamic Path Resolution ---
-BASE_DIR = os.path.expanduser("~/Desktop/ark")
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-MODEL_PATH = os.path.join(BASE_DIR, "model")
-ARK_BIN = os.path.join(BASE_DIR, "ark_bin")
+PATHS = get_runtime_paths()
+BASE_DIR = str(PATHS.project_root)
+CONFIG_PATH = str(PATHS.config_path)
+ARK_BIN = str(PATHS.ark_bin_path)
+
+configure_logging()
+logger = logging.getLogger("ark.listen")
 
 
 def load_config() -> dict[str, Any]:
@@ -28,33 +40,25 @@ def load_config() -> dict[str, Any]:
 
     Terminates execution immediately using Fail-Fast pattern if the config is missing.
     """
-    if not os.path.exists(CONFIG_PATH):
+    cfg = load_runtime_config().raw
+    if not cfg:
         print(f"CRITICAL ERROR: Configuration file not found at -> {CONFIG_PATH}")
         exit(1)
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return cfg
 
 
 # Load global configuration dictionary
 config = load_config()
 
 LISTENING_AUDIO_PATH = os.path.join(
-    BASE_DIR,
-    "assets",
+    str(PATHS.assets_dir),
     config.get("assets", {}).get("listening_sound", "ark_listening.wav"),
 )
 
-# --- Vosk Model Initialization & Validation ---
-if not os.path.exists(MODEL_PATH):
-    print(f"CRITICAL ERROR: Vosk model directory not found at -> {MODEL_PATH}")
-    print(
-        "Please download and extract the model directory as 'model' under the root folder."
-    )
-    exit(1)
-
-print("ARK: Loading offline speech recognition model into RAM...")
-model = Model(MODEL_PATH)
-print("ARK: System initialized successfully. Cloud connectivity: DISABLED.")
+VOICE_MANAGER = VoiceRecognitionManager(
+    model_en_dir=PATHS.model_dir,
+    model_tr_dir=PATHS.model_tr_dir,
+)
 
 
 def listen_once() -> None:
@@ -67,70 +71,48 @@ def listen_once() -> None:
 
     # 1. Play auditory feedback synchronously
     if os.path.exists(LISTENING_AUDIO_PATH):
-        subprocess.run(["afplay", LISTENING_AUDIO_PATH])
+        play_audio_file(LISTENING_AUDIO_PATH)
     else:
-        print(
-            f"[ARK WARN] Listening sound missing at '{LISTENING_AUDIO_PATH}'. Proceeding silently..."
-        )
+        logger.warning("Listening sound missing; proceeding silently")
 
-    # 2. Initialize speech recognizer and open microphone safely
-    r = sr.Recognizer()
-    print("ARK: Listening (Offline mode active)... Speak now!")
-
-    source = None
     try:
-        source = sr.Microphone()
-        with source:
-            # Calibrate ambient noise floor and set threshold boundaries
-            r.adjust_for_ambient_noise(source, duration=0.1)
-            r.energy_threshold = max(r.energy_threshold, 300)
+        cmd = VOICE_MANAGER.recognize(
+            session_id="hotkey-listener",
+            phrase_limit_sec=5,
+            language="en",
+        ).lower()
+        print(f"Command received: '{cmd}'")
 
-            # Allocate a 5-second timeout window with a 4-second phrase limit
-            audio = r.listen(source, phrase_time_limit=4, timeout=5)
-            pcm_data = audio.get_raw_data(convert_rate=16000, convert_width=2)
+        if not cmd:
+            print("Audio unrecognized or empty input received.")
+            return
 
-            # Process PCM stream through Vosk local recognizer engine
-            rec = KaldiRecognizer(model, 16000)
-            rec.AcceptWaveform(pcm_data)
-            result = json.loads(rec.FinalResult())
+        # Match transcribed keywords dynamically against config rules
+        command_dispatched = False
+        commands = config.get("commands", {})
 
-            cmd = result.get("text", "").lower()
-            print(f"Command received: '{cmd}'")
+        for cmd_id, meta in commands.items():
+            keywords = meta.get("keywords", [])
+            if any(kw in cmd for kw in keywords):
+                print(
+                    f"Dispatching {meta.get('name', '').capitalize()} Mode ({cmd_id})..."
+                )
+                # Asynchronously launch the Go binary engine without blocking the main loop
+                subprocess.Popen([ARK_BIN, cmd_id], cwd=BASE_DIR)
+                command_dispatched = True
+                break
 
-            if not cmd:
-                print("Audio unrecognized or empty input received.")
-                return
+        if not command_dispatched:
+            print(f"Unrecognized command context: '{cmd}'")
 
-            # Match transcribed keywords dynamically against config rules
-            command_dispatched = False
-            commands = config.get("commands", {})
-
-            for cmd_id, meta in commands.items():
-                keywords = meta.get("keywords", [])
-                if any(kw in cmd for kw in keywords):
-                    print(
-                        f"Dispatching {meta.get('name', '').capitalize()} Mode ({cmd_id})..."
-                    )
-                    # Asynchronously launch the Go binary engine without blocking the main loop
-                    subprocess.Popen([ARK_BIN, cmd_id], cwd=BASE_DIR)
-                    command_dispatched = True
-                    break
-
-            if not command_dispatched:
-                print(f"Unrecognized command context: '{cmd}'")
-
+    except VoiceModelNotAvailableError as exc:
+        logger.error(str(exc))
+    except VoiceMicrophoneError as exc:
+        logger.error(str(exc))
+    except VoiceSessionBusyError:
+        logger.warning("Voice session already active")
     except Exception as e:
         print(f"Listening error or timeout encountered: {e}")
-
-    finally:
-        # HARDWARE SAFETY NET: Force-release CoreAudio/PortAudio stream locks to prevent driver freezes
-        if source and hasattr(source, "stream") and source.stream:
-            try:
-                if hasattr(source.stream, "pyaudio_stream"):
-                    source.stream.pyaudio_stream.stop_stream()
-                    source.stream.pyaudio_stream.close()
-            except Exception:
-                pass
 
 
 if __name__ == "__main__":

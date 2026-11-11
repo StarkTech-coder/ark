@@ -119,41 +119,108 @@ Plaintext
 ├── chat_ui.py                # Chainlit UI controller & LLM streaming bridge
 ├── config.json               # Central system configuration & command mappings
 └── go.mod                    # Go module dependencies
-🛠️ Tech Stack & Dependencies
-Backend & Automation (Go)
-Language: Go 1.22+
-OS Native Tools: AppleScript (osascript), afplay (Audio Playback)
-AI Core & UI (Python)
-UI Framework: Chainlit
-LLM Runtime: Ollama (Dynamic model selection: qwen3:8b, deepseek-r1, llava, etc.)
-Embeddings Model: bge-m3 (1024 dimensions)
-Vector Store: LanceDB (Local, Embedded)
-Speech Recognition: Vosk Offline STT
-Database: SQLite3
-🚀 Quick Start & Installation
-1. Prerequisites
-Ensure you have the following tools installed on your macOS machine:
-Go (v1.22 or higher)
-Python (v3.10 or higher)
-Ollama running locally (ollama serve)
-Pull required Ollama models:
-Bash
+## 🛠️ Tech Stack & Dependencies
+
+- Go backend automation (`ark_bin`)
+- Python orchestration runtime
+- Chainlit UI
+- Ollama local inference runtime
+- LanceDB vector storage
+- SQLite persistent memory
+- Vosk offline speech recognition
+
+## 🚀 Quick Start (Local)
+
+### 1) Prerequisites
+
+- Go 1.22+
+- Python 3.10+
+- Ollama running locally
+
+Pull required models:
+
+```bash
+ollama serve
+# Keep your existing local Qwen3:8B Q4 model tag.
+# Example tag (common):
 ollama pull qwen3:8b
 ollama pull bge-m3
+```
+
+Optional vision model:
+
+```bash
 ollama pull llava
-2. Build Go Binary
-Compile the Go backend engine to the project root:
-Bash
-go build -o ark_bin cmd/ark/main.go
-3. Setup Python Virtual Environment
-Bash
+```
+
+### 2) Build Go binary
+
+```bash
+go build -o ark_bin main.go
+```
+
+### 3) Python setup
+
+```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-4. Launch ARK
-Start the Chainlit user interface:
-Bash
-chainlit run chat_ui.py -w
+```
+
+### 4) Launch ARK backend/UI on localhost
+
+```bash
+chainlit run chat_ui.py --host 127.0.0.1 --port 8000 --headless
+```
+
+Open: `http://127.0.0.1:8000`
+
+## 🖥️ Desktop-oriented launch workflow (macOS)
+
+```bash
+python -m desktop.main --port 8000
+```
+
+- Binds to localhost (`127.0.0.1`) only.
+- Waits for backend readiness before opening UI.
+- Falls back to local browser-based desktop flow.
+- Cleans up backend process on launcher shutdown.
+
+## 📦 Build macOS `.app` bundle
+
+```bash
+bash desktop/build_macos_app.sh
+```
+
+Output:
+
+- `dist/ARKDesktop.app`
+
+Signing/notarization is not included without Apple Developer credentials.
+
+## 🎙️ Vosk voice setup
+
+ARK voice remains local-only. Model directories are resolved in this order:
+
+1. `ARK_VOSK_MODEL_DIR` and `ARK_VOSK_MODEL_TR_DIR`
+2. Project folders: `model/` and `model_tr/`
+3. App data folders under `~/Library/Application Support/ARK/`
+
+If models are missing, voice endpoints return a setup error instead of crashing.
+
+Microphone permission (macOS):
+
+- Open **System Settings → Privacy & Security → Microphone**
+- Allow access for the terminal or app process running ARK
+
+## 🔒 Privacy and data locations
+
+- Local-first by default.
+- No cloud AI dependency for core assistant runtime.
+- User data is stored outside the packaged app using platform-aware paths.
+- Bundle must not include private SQLite/LanceDB/documents.
+
+Detailed setup and troubleshooting: [docs/macos_desktop_setup.md](docs/macos_desktop_setup.md)
 ⌨️ Command Modes & Automations
 Mode ID	Command Name	Description	Trigger Keywords
 01	Work	Resets to Space 1, launches Spotify + Gmail, moves to Space 2 for Safari research, opens VS Code + Notes in Space 3.	work, coding, office
@@ -167,5 +234,6 @@ ARK is under active development. Current roadmap milestones include:
 [ ] MCP Error Recovery & Fallbacks: Self-healing retry mechanisms for file parsing errors or vector insertion failures.
 [ ] Automated Integration Tests: Comprehensive E2E test suites for Go CLI subprocess bridges and Python API routes.
 [ ] Vision Model Lifecycle Optimization: Dynamic unload signals to Ollama API to free VRAM/RAM immediately after processing image queues.
-📜 License
+## 📜 License
+
 This project is open-source under the MIT License. Designed and built with high standards of privacy and software engineering principles.

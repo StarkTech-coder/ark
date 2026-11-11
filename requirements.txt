@@ -1,0 +1,11 @@
+chainlit
+httpx
+ollama
+pyaudio
+vosk
+lancedb
+pyarrow
+pypdf
+python-docx
+pynput
+SpeechRecognition

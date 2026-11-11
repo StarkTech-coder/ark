@@ -1,0 +1,2 @@
+# Build-time dependency for macOS desktop app packaging
+pyinstaller>=6.0,<7.0

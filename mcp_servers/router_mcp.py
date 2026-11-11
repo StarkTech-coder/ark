@@ -7,25 +7,16 @@ web search queries into high-precision English search terms.
 
 from typing import Any
 import json
-import os
 import re
-import httpx
-from ollama import AsyncClient
+from llm.config import get_active_chat_model
+from llm.factory import get_chat_provider
 
-BASE_DIR = os.path.expanduser("~/Desktop/ark")
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+CHAT_PROVIDER = get_chat_provider()
 
 
 def get_active_model() -> str:
     """Read active model from config.json, defaulting to qwen3:8b if missing."""
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get("ai", {}).get("active_model", "qwen3:8b")
-        except Exception:
-            pass
-    return "qwen3:8b"
+    return get_active_chat_model()
 
 
 async def classify_document(
@@ -46,31 +37,23 @@ async def classify_document(
     )
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "http://127.0.0.1:11434/api/generate",
-                json={
-                    "model": active_model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "options": {"temperature": 0.1},
-                },
-                timeout=15.0,
-            )
-            if response.status_code == 200:
-                raw_response = response.json().get("response", "").strip()
-                clean_text = re.sub(
-                    r"<think>.*?</think>", "", raw_response, flags=re.DOTALL
-                ).strip()
-                if "```" in clean_text:
-                    clean_text = re.sub(
-                        r"```(?:json)?\s*([\s\S]*?)\s*```", r"\1", clean_text
-                    ).strip()
+        raw_response = await CHAT_PROVIDER.generate_response(
+            model=active_model,
+            prompt=prompt,
+            options={"temperature": 0.1},
+            response_format="json",
+        )
+        clean_text = re.sub(
+            r"<think>.*?</think>", "", (raw_response or ""), flags=re.DOTALL
+        ).strip()
+        if "```" in clean_text:
+            clean_text = re.sub(
+                r"```(?:json)?\s*([\s\S]*?)\s*```", r"\1", clean_text
+            ).strip()
 
-                parsed = json.loads(clean_text)
-                print(f"[MCP ROUTER] Successfully classified '{file_name}': {parsed}")
-                return parsed
+        parsed = json.loads(clean_text)
+        print(f"[MCP ROUTER] Successfully classified '{file_name}': {parsed}")
+        return parsed
     except Exception as e:
         print(f"[MCP ROUTER ERROR] Classification failed: {e}")
 
@@ -93,7 +76,6 @@ async def classify_document(
 async def route_query_intent(query_text: str) -> str:
     """Determine semantically which of the 3 database tables the query belongs to."""
     active_model = get_active_model()
-    client = AsyncClient(host="[http://127.0.0.1:11434](http://127.0.0.1:11434)")
 
     prompt = f"""
 You are an intelligent RAG database router. Based on the user query, decide which database table to search.
@@ -111,15 +93,13 @@ Please respond ONLY in the following JSON format:
 """
 
     try:
-        response = await client.chat(
+        content = await CHAT_PROVIDER.generate_response(
             model=active_model,
             messages=[{"role": "user", "content": prompt}],
             options={"temperature": 0.1, "num_predict": 50},
         )
-        content = response.get("message", {}).get("content", "").strip()
-        clean_content = re.sub(
-            r"<think>.*?</think>", "", content, flags=re.DOTALL
-        ).strip()
+        clean_content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+        clean_content = clean_content.strip()
         if "```" in clean_content:
             clean_content = re.sub(
                 r"```(?:json)?\s*([\s\S]*?)\s*```", r"\1", clean_content
@@ -175,7 +155,6 @@ async def optimize_search_query(user_query: str) -> str:
         Clean, English optimized web search string.
     """
     active_model = get_active_model()
-    client = AsyncClient(host="http://127.0.0.1:11434")
 
     prompt = (
         "You are a web search query translator and optimizer.\n"
@@ -187,12 +166,11 @@ async def optimize_search_query(user_query: str) -> str:
     )
 
     try:
-        response = await client.generate(
+        raw_response = await CHAT_PROVIDER.generate_response(
             model=active_model,
             prompt=prompt,
             options={"temperature": 0.1, "num_predict": 25},
         )
-        raw_response = response.get("response", "").strip()
         clean_query = re.sub(
             r"<think>.*?</think>", "", raw_response, flags=re.DOTALL
         ).strip()

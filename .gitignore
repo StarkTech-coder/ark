@@ -22,10 +22,19 @@ ark_bin
 node_modules/
 dist/
 build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
 
-# Local Documents, Vector Database & SQLite Memories
+# Local Documents & Databases
 documents/
 lancedb_data/
-ark_memory.db
-memory/
 .lancedb/
+ark_memory.db
+memory/*.db
+memory/**/*.db
+memory/*.sqlite
+memory/**/*.sqlite
+memory/*.sqlite3
+memory/**/*.sqlite3

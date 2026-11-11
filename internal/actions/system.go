@@ -12,11 +12,22 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 )
 
-// GetRootDir dynamically resolves the absolute path to the user's ARK project root directory (~/Desktop/ark).
+// GetRootDir dynamically resolves the ARK project root directory.
 // Returns "." if the user's home directory cannot be retrieved.
 func GetRootDir() string {
+	if root := os.Getenv("ARK_ROOT_DIR"); root != "" {
+		return root
+	}
+
+	if cwd, err := os.Getwd(); err == nil {
+		if _, err := os.Stat(filepath.Join(cwd, "config.json")); err == nil {
+			return cwd
+		}
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "."
@@ -26,11 +37,15 @@ func GetRootDir() string {
 
 // RunCommand executes a raw AppleScript snippet using the macOS osascript binary.
 func RunCommand(script string) {
+	if runtime.GOOS != "darwin" {
+		fmt.Println("RunCommand is unsupported on this platform")
+		return
+	}
 	fmt.Println("Executing script:", script)
 	cmd := exec.Command("osascript", "-e", script)
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("Action failed: %v\n", err)
-	} 
+	}
 }
 
 // RunTerminalCommand executes a native binary or shell command synchronously.
@@ -43,6 +58,10 @@ func RunTerminalCommand(command string, args ...string) {
 
 // PlaySystemSound plays a target WAV/MP3 audio asset synchronously using the macOS native afplay utility.
 func PlaySystemSound(soundName string) {
+	if runtime.GOOS != "darwin" {
+		fmt.Printf("Audio playback not supported on this platform (%s)\n", soundName)
+		return
+	}
 	assetPath := filepath.Join(GetRootDir(), "assets", soundName)
 	cmd := exec.Command("/usr/bin/afplay", assetPath)
 	if err := cmd.Run(); err != nil {
@@ -74,6 +93,10 @@ func SwitchSpaceLeft() {
 
 // GoToFirstSpace forces the macOS workspace focus back to Space 1 by executing sequential left switches.
 func GoToFirstSpace() {
+	if runtime.GOOS != "darwin" {
+		fmt.Println("GoToFirstSpace is unsupported on this platform")
+		return
+	}
 	for i := 0; i < 3; i++ {
 		script := `tell application "System Events" to key code 123 using {control down}`
 		cmd := exec.Command("osascript", "-e", script)
