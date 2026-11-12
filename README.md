@@ -1,239 +1,296 @@
-Markdown
-# 🛡️ ARK — Autonomous Reasoning & Knowledge System
+# ARK — Autonomous Reasoning & Knowledge System
 
-**ARK** is an ultra-fast, local, offline-first personal AI ecosystem and workspace automation framework designed for macOS. Powered by a hybrid high-performance **Go backend** and an advanced **Python RAG/MCP control plane**, ARK serves as an autonomous assistant built around the **Stark HUD Protocol**.
+ARK is a local-first AI assistant and desktop automation system. It combines a Python application layer for conversation, model orchestration, memory, retrieval and tool management with a Go execution layer for fast command routing, system automation and utility operations.
 
-ARK operates **strictly offline and private by default** without cloud dependencies or telemetry. When web search mode is explicitly enabled by the user, only anonymized search queries and requested URL contents are fetched—your local documents, private memory, and personal history **never leave the device**.
+The architecture is modular: the user interface, runtime lifecycle, LLM provider, persistent memory, document retrieval, local tools and native system actions are separated into focused packages. Ollama is the current LLM runtime implementation; network-backed research and GitHub features are optional integrations rather than requirements for the local chat and knowledge workflows.
 
----
-
-## 🏛️ System Architecture
-
-ARK leverages a split-runtime architecture combining Go's low-level execution speed with Python's AI/RAG orchestration capabilities:
+## Architecture at a glance
 
 ```text
-                  +-----------------------------------+
-                  |      Chainlit UI / Web Client     |
-                  +-----------------+-----------------+
-                                    |
-                                    v
-+-----------------------------------+-----------------------------------+
-|                     Python Orchestrator Plane                         |
-|                                                                       |
-|  +--------------------+   +-------------------+   +----------------+  |
-|  |  Vosk STT Engine   |   |   Ollama LLM Client |   | SQLite Memory  |  |
-|  | (EN/TR Offline)    |   | (Dynamic Select)  |   | (Thread DB)    |  |
-|  +--------------------+   +-------------------+   +----------------+  |
-|                                                                       |
-|  +-----------------------------------------------------------------+  |
-|  |                   Model Context Protocol (MCP)                  |  |
-|  |  +------------------+  +-------------------+  +---------------+ |  |
-|  |  | FileSystem MCP   |  |   LanceDB MCP     |  |  Router MCP   | |  |
-|  |  | (Multi-Format)   |  | (3-Tier VectorDB) |  | (Intent AI)   | |  |
-|  |  +------------------+  +-------------------+  +---------------+ |  |
-|  +-----------------------------------------------------------------+  |
-+-----------------------------------+-----------------------------------+
-                                    |
-               CLI Bridge & Subprocess Invocation (ark_bin)
-                                    |
-                                    v
-+-----------------------------------+-----------------------------------+
-|                        Go High-Speed Engine                           |
-|                                                                       |
-|  +-------------------+    +--------------------+    +--------------+  |
-|  |  CLI Router       |    | System Actions     |    | Fast Web     |  |
-|  |  & Dispatcher     |--->| (AppleScript / UI) |--->| Scraper      |  |
-|  +-------------------+    +--------------------+    +--------------+  |
-|                                                                       |
-|  +-----------------------------------------------------------------+  |
-|  |                     Workspace Modes Engine                      |  |
-|  |  +------------+  +---------------+  +------------+  +---------+ |  |
-|  |  |  01 Work   |  |  02 Research  |  | 03 Social  |  | 04 HUD  | |  |
-|  |  +------------+  +---------------+  +------------+  +---------+ |  |
-|  +-----------------------------------------------------------------+  |
-+-----------------------------------------------------------------------+
-🧠 Deep-Dive: System Architecture & Subsystems
-📚 LanceDB 3-Tier Knowledge Base Architecture
-To avoid vector noise, cross-domain hallucination, and inefficient top-k searches, ARK isolates vector knowledge into three distinct physical tables within a single local .lancedb instance:
-university_knowledge_base: Lecture notes, PDFs, textbooks, academic theories.
-code_knowledge_base: Source code files (.go, .py, .md), technical repositories, framework SDKs.
-relationship_knowledge_base: Personal notes, chat history transcripts, relationship memories.
-Intent Routing: Before vector retrieval, Router MCP classifies user query intent using an LLM or keyword fallback. The router deterministically selects the exact target table (e.g., searching only relationship_knowledge_base for personal queries), avoiding cross-table noise and accelerating search speeds.
-Fast-Skip Deduplication: Incoming files are checked against table source metadata (is_file_already_indexed). Existing files bypass redundant embedding pipelines and LLM vision ingestion instantly.
-🔄 Memory Architecture vs. RAG Pipeline
-ARK strictly separates Conversational State (Memory) from Document Context (RAG) to ensure latency optimization and zero token clutter:
-Feature	Conversational Memory	Vector RAG
-Primary Domain	Thread-isolated chat history & user facts	Multi-domain document & chat embeddings
-Isolation Level	Thread-Isolated (thread_id)	Category-Isolated (3 Tables)
-Storage Engine	Local SQLite (ark_memory.db)	Local LanceDB (.lancedb)
-Retrieval Type	Sequential / Key-Value Lookup	Semantic Vector Search (O(1) ANN)
-Lifecycle	Persistent & Sliding Window Context	Static / File-Ingested Knowledge Base
-👁️ Local Vision Processing & Optimization
-On-Demand OCR / Description: When an image (.jpg, .png) is placed into the documents/ directory, fs_mcp automatically dispatches it to a local Ollama Vision model (llava).
-RAG Context Integration: Generated Turkish/English image captions are formatted as structured text blocks ([VISION ANALYSIS / CAPTION]) and automatically chunked and vectorized into LanceDB.
-Lazy Loading & Memory Optimization: The vision model is invoked statelessly via Ollama API endpoints, releasing unified RAM back to Apple Silicon for LLM text inference once captioning completes.
-⚙️ System Design Decisions (Trade-offs & Rationale)
-Why Go + Python Hybrid?
-Go: Selected for OS-level IPC, lightning-fast subprocess orchestration, instant AppleScript execution, and high-concurrency web scraping with minimal memory footprint.
-Python: Selected for rich AI/ML ecosystem maturity (Ollama integration, PyArrow, LanceDB bindings, Vosk STT, Chainlit UI).
-Why LanceDB?
-Embedded, serverless, disk-persisted vector store utilizing Apache Arrow columnar format. Zero overhead, near-instant cold startup times, and optimal M-series Apple Silicon RAM usage.
-Why SQLite for Memory?
-ACID-compliant, lightweight, and zero-configuration storage perfect for thread-isolated conversation threads and key-value memory records.
-Why Model Context Protocol (MCP) Pattern?
-Decouples data ingestion (fs_mcp), vector persistence (lancedb_mcp), and classification logic (router_mcp). Enables clean, modular, and auditable tool execution boundaries.
-Why Local-First & Private Architecture?
-Complete privacy guarantees, zero API latency/rate limits, immunity to cloud service outages, and total data ownership on local storage.
-✨ Key Features
-🔒 Offline-First & Privacy Preserved: 100% local operation by default. When web search is explicitly toggled, only external query strings are fetched—your private databases and files are never transmitted online.
-⚡ Hybrid High-Performance Core: Low-level OS window positioning, space switching, audio cues, and HTTP scraping handled by Go binaries; AI orchestration handled by Python.
-📚 3-Tier LanceDB Vector RAG: Physical table separation avoiding vector noise across university, code, and relationship domains.
-🤖 Model Context Protocol (MCP): Decoupled MCP servers for file system operations, vector insertion, and intent routing.
-🎛️ Dynamic UI Model Hot-Swapping: Select and switch installed Ollama models on the fly via Chainlit UI settings.
-🎙️ Speech-to-Text & Custom Voice Commands: Integrated offline Vosk speech recognition with audio feedback triggers.
-🖥️ Automated Workspace Switching: Deterministic macOS Space switching controlling Spotify, Safari, Chrome, VS Code, Notes, and Terminal via AppleScript.
-📁 Repository Structure
-Plaintext
+                         USER
+                          |
+             +------------+-------------+
+             |                          |
+       Chainlit / FastAPI          Desktop launcher
+         chat_ui.py                desktop/main.py
+             |                          |
+             +------------+-------------+
+                          |
+                PYTHON APPLICATION LAYER
+                          |
+       +------------------+-----------------------+
+       |                  |                       |
+  Request workflow    LLM provider           Runtime services
+  classification      interface               config / paths /
+  and orchestration   Ollama adapter           lifecycle / logging
+       |                  |                       |
+       +------------------+-----------------------+
+                          |
+       +------------------+-----------------------+
+       |                  |                       |
+  Persistent memory   Knowledge retrieval     Local tool registry
+  SQLite              LanceDB + embeddings    MCP-style management
+  conversations       domain routing          permissions / consent
+       |                  |                       |
+       +------------------+-----------------------+
+                          |
+                 TOOL / EXECUTION BRIDGE
+                          |
+                 Go CLI binary (ark_bin)
+                          |
+       +------------------+-----------------------+
+       |                  |                       |
+  Command dispatcher  Native system actions   Utility services
+  workspace modes     AppleScript / macOS      web / APIs /
+                      Spaces / audio           parallel pipeline
+```
+
+## Main subsystems
+
+### 1. Python orchestration and user interface
+
+- `chat_ui.py` is the main Chainlit interface and application orchestration entry point.
+- The request workflow classifies incoming prompts into general chat, project/RAG, memory, web research, GitHub and tool-oriented paths.
+- The UI connects conversation history, source attribution, model streaming, retrieval and tool execution.
+- FastAPI routes are used alongside the Chainlit application for application endpoints.
+- `desktop/` provides a local desktop launcher. It checks backend readiness, selects an available port when needed, opens the local interface and shuts down the child process cleanly.
+
+### 2. LLM provider layer
+
+- `llm/providers/base.py` defines the provider contract.
+- `llm/providers/ollama_provider.py` implements chat generation, streaming, model discovery, health checks and model switching through Ollama.
+- `llm/factory.py` constructs the configured provider. Ollama is the currently implemented provider and the fallback.
+- `llm/config.py` resolves the active chat, embedding and vision models, Ollama endpoint and hardware profiles from configuration and environment variables.
+
+Default model settings in the repository configuration include `qwen3:8b` for chat, `bge-m3` for embeddings and `llava` for image description. Actual runtime settings can be overridden.
+
+### 3. Persistent memory — SQLite
+
+The memory subsystem is separate from document RAG. It stores structured long-term memory records and conversation messages.
+
+- `memory/connection.py`: SQLite connection and transaction management, including WAL mode.
+- `memory/migrations.py`: versioned schema migrations.
+- `memory/repository.py`: persistence and query operations.
+- `memory/service.py`: application-level memory operations, validation, domain checks and import/export.
+- `memory/api.py`: management facade for integrations.
+
+Memory records support domains, types, tags, metadata, importance scores, expiration, active/deleted state and soft deletion. The service also supports filtered listing, search, statistics, JSON/CSV export and JSON import. Cross-domain searches require explicit authorization.
+
+### 4. Document knowledge and RAG — LanceDB
+
+The RAG subsystem indexes document chunks and retrieves relevant context independently of conversational memory.
+
+- `rag/vector_store.py` manages the embedded LanceDB store, embeddings, table selection, insertion and retrieval.
+- `mcp_servers/fs_mcp.py` discovers and extracts supported local documents.
+- `mcp_servers/router_mcp.py` classifies documents and routes queries to the appropriate knowledge domain.
+- `mcp_servers/lancedb_mcp.py` chunks extracted content and sends it to the vector store.
+
+The knowledge store separates content into domain-specific tables, including university, code and relationship knowledge bases. A WhatsApp-specific table is also recognized for compatibility with message data. Retrieval combines vector similarity with keyword scoring and supports source-aware results.
+
+Supported ingestion paths include PDF, text, Python, Go, Markdown, JSON, CSV, DOCX and common image formats. Image files can be described using the configured local Ollama vision model before being indexed as text.
+
+### 5. Local tool registry and permissions
+
+`mcp_servers/management.py` provides a registry and authorization layer for ARK's local tools. In the current implementation, the default tools are registered as local tools; they are not separate remote MCP protocol processes.
+
+The default registry covers:
+
+- Local filesystem discovery and document reading
+- Document/query classification and routing
+- LanceDB document ingestion
+- Local system actions
+- Web research
+- Read-only GitHub repository inspection
+
+Tool permissions are represented by `disabled`, `read`, `write` and `admin`. Sensitive actions can require explicit confirmation. Permission state is scoped to a user/session and persisted through the SQLite database layer.
+
+### 6. Optional web and GitHub integrations
+
+- `mcp_servers/web_research_mcp.py` performs web research, extracts source content and formats source-aware research results. It validates remote URLs and blocks localhost, private, loopback and other non-public network targets to reduce SSRF risk.
+- `mcp_servers/github_mcp.py` provides read-only GitHub operations such as repository listing, commits, issues, pull requests, diffs and file reads. Configure `ARK_GITHUB_TOKEN` or `GITHUB_TOKEN` to enable authenticated access.
+- The Go utility layer also contains web fetching and external API helpers.
+
+These features require network access when invoked. ARK's local chat, SQLite memory and local LanceDB workflows are designed to run against local services; the project should therefore be described as **local-first**, not as unconditionally offline.
+
+### 7. Go execution and macOS automation layer
+
+The Go module is a separate execution layer, built as the `ark_bin` binary from the repository root.
+
+- `main.go`: command-line entry point. Routes web fetching, parallel intent pipelines, direct API requests and standard workspace mode IDs.
+- `internal/dispatcher/router.go`: maps mode IDs to their handlers.
+- `internal/modes/`: Work, Research, Social and HUD workspace routines.
+- `internal/actions/system.go`: AppleScript execution, macOS Space navigation, application activation and audio playback.
+- `internal/tools/`: web fetching, parallel intent execution and utility/API integrations.
+
+The native automation routines use macOS facilities such as `osascript` and `afplay`. Those actions are macOS-specific; the Go packages guard or report unsupported platform operations where applicable.
+
+## Data and runtime boundaries
+
+ARK separates source code from runtime data. Runtime paths are resolved centrally in `runtime/paths.py`, with platform-aware defaults and environment overrides.
+
+Important environment overrides include:
+
+| Variable | Purpose |
+|---|---|
+| `ARK_PROJECT_ROOT` | Project/resource root |
+| `ARK_APP_DATA_DIR` | Application data directory |
+| `ARK_APP_CONFIG_DIR` | Application configuration directory |
+| `ARK_APP_CACHE_DIR` | Cache directory |
+| `ARK_CONFIG_PATH` | Explicit configuration file |
+| `ARK_MEMORY_DB_PATH` | SQLite memory database path |
+| `ARK_LANCEDB_PATH` | LanceDB storage path |
+| `ARK_VOSK_MODEL_DIR` | English Vosk model directory |
+| `ARK_VOSK_MODEL_TR_DIR` | Turkish Vosk model directory |
+| `ARK_BIN_PATH` | Go executable path |
+| `ARK_PROVIDER` | LLM provider selection |
+| `ARK_ACTIVE_MODEL` | Active chat model |
+| `ARK_EMBEDDING_MODEL` | Embedding model |
+| `OLLAMA_HOST` | Ollama endpoint |
+| `ARK_GITHUB_TOKEN` / `GITHUB_TOKEN` | GitHub API authentication |
+
+On macOS, application data defaults to `~/Library/Application Support/ARK`. SQLite, LanceDB, Vosk models, documents and credentials are runtime assets and should not be committed to the source repository. The local database directory is intentionally excluded from Git.
+
+## Repository layout
+
+```text
 .
-├── cmd/
-│   └── ark/
-│       └── main.go           # Go CLI Entry point & subcommand handler
-├── internal/
-│   ├── actions/              # Low-level macOS AppleScript & Audio control
-│   ├── dispatcher/           # Command routing logic
-│   ├── modes/                # Workspace automation presets (Work, Research, Social, HUD)
-│   └── tools/                # Native Go utilities (Scraper, Pipeline, API)
-├── mcp_servers/
-│   ├── fs_mcp.py             # FileSystem MCP: Document scanning & Vision integration
-│   ├── lancedb_mcp.py        # LanceDB MCP: Ingestion & chunking pipeline
-│   └── router_mcp.py         # Router MCP: Dynamic intent & category classification
-├── rag/
-│   └── vector_store.py       # LanceDB vector database controller & embeddings engine
+├── chat_ui.py                  # Chainlit UI and Python orchestration
+├── listen.py                   # Offline voice command entry point
+├── main.go                     # Go CLI entry point
+├── go.mod                      # Go module definition
+├── config.json                 # Default application/model/command settings
+├── desktop/
+│   ├── main.py                 # Desktop launcher entry point
+│   ├── launcher.py             # Backend process and readiness management
+│   └── backend_main.py         # Bundled Chainlit backend entry point
+├── llm/
+│   ├── config.py               # Model/provider configuration
+│   ├── factory.py              # Provider construction
+│   └── providers/              # Provider interface and implementations
 ├── memory/
-│   └── db.py                 # Thread-isolated SQLite chat history & persistent facts
-├── assets/                   # Audio feedback WAV assets
-├── documents/                # Multi-tier RAG ingestion directories
-│   ├── code/
-│   ├── relationship/
-│   └── university/
-├── chat_ui.py                # Chainlit UI controller & LLM streaming bridge
-├── config.json               # Central system configuration & command mappings
-└── go.mod                    # Go module dependencies
-## 🛠️ Tech Stack & Dependencies
-
-- Go backend automation (`ark_bin`)
-- Python orchestration runtime
-- Chainlit UI
-- Ollama local inference runtime
-- LanceDB vector storage
-- SQLite persistent memory
-- Vosk offline speech recognition
-
-## 🚀 Quick Start (Local)
-
-### 1) Prerequisites
-
-- Go 1.22+
-- Python 3.10+
-- Ollama running locally
-
-Pull required models:
-
-```bash
-ollama serve
-# Keep your existing local Qwen3:8B Q4 model tag.
-# Example tag (common):
-ollama pull qwen3:8b
-ollama pull bge-m3
+│   ├── api.py                  # Memory management facade
+│   ├── connection.py           # SQLite connection/transactions
+│   ├── migrations.py           # Database schema migrations
+│   ├── repository.py           # Persistence/query layer
+│   └── service.py              # Memory business logic
+├── rag/
+│   └── vector_store.py         # LanceDB, embeddings and retrieval
+├── mcp_servers/
+│   ├── management.py           # Local tool registry and authorization
+│   ├── fs_mcp.py               # Document discovery and extraction
+│   ├── router_mcp.py           # Intent/document routing
+│   ├── lancedb_mcp.py          # Chunking and vector ingestion
+│   ├── web_research_mcp.py     # Secure web research helpers
+│   └── github_mcp.py           # Read-only GitHub integration
+├── runtime/
+│   ├── config.py               # Runtime configuration
+│   ├── lifecycle.py            # Startup/readiness/shutdown
+│   ├── logging_config.py       # Logging setup
+│   ├── paths.py                # Cross-platform path resolution
+│   ├── platform_ops.py         # Platform-specific operations
+│   └── voice.py                # Session-safe Vosk recognition
+├── internal/
+│   ├── actions/                # Native OS actions
+│   ├── dispatcher/             # Go command routing
+│   ├── modes/                  # Workspace automation modes
+│   └── tools/                  # Go utility services
+├── documents/                  # Local document ingestion folders
+├── assets/                     # Local audio/UI assets
+└── tests/                      # Python tests
 ```
 
-Optional vision model:
+## Runtime lifecycle
 
-```bash
-ollama pull llava
-```
+At startup, `runtime/lifecycle.py` configures logging, loads runtime configuration, creates required runtime directories and initializes SQLite. It also probes LanceDB and optionally checks the configured LLM provider. SQLite is treated as the critical service; LanceDB and the model provider are reported as optional readiness states.
 
-### 2) Build Go binary
+The desktop launcher starts the Chainlit backend on loopback (`127.0.0.1`), waits for readiness and owns the backend process lifecycle. The application can also be started directly through Chainlit for development.
 
-```bash
-go build -o ark_bin main.go
-```
+## Getting started
 
-### 3) Python setup
+### Requirements
+
+- Python environment compatible with the installed dependencies
+- Go version declared in `go.mod`
+- Ollama for local chat and embedding inference
+- macOS for the native workspace automation actions
+- Optional: Vosk English/Turkish model directories for voice recognition
+- Optional: `llava` or another configured Ollama vision model for image descriptions
+- Optional: GitHub token for repository integration
+
+### Install Python dependencies
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 4) Launch ARK backend/UI on localhost
+### Prepare local models
+
+Start Ollama and pull the models configured for the installation. The repository defaults are:
 
 ```bash
-chainlit run chat_ui.py --host 127.0.0.1 --port 8000 --headless
+ollama serve
+ollama pull qwen3:8b
+ollama pull bge-m3
+ollama pull llava
 ```
 
-Open: `http://127.0.0.1:8000`
+The vision model is only needed for image captioning. Model names can be changed in `config.json` or through supported environment settings.
 
-## 🖥️ Desktop-oriented launch workflow (macOS)
+### Build the Go executable
+
+From the repository root:
+
+```bash
+go build -o ark_bin .
+```
+
+### Start ARK
+
+Desktop launcher:
 
 ```bash
 python -m desktop.main --port 8000
 ```
 
-- Binds to localhost (`127.0.0.1`) only.
-- Waits for backend readiness before opening UI.
-- Falls back to local browser-based desktop flow.
-- Cleans up backend process on launcher shutdown.
-
-## 📦 Build macOS `.app` bundle
+Direct Chainlit development mode:
 
 ```bash
-bash desktop/build_macos_app.sh
+chainlit run chat_ui.py --host 127.0.0.1 --port 8000 --headless
 ```
 
-Output:
+Then open `http://127.0.0.1:8000`.
 
-- `dist/ARKDesktop.app`
+### Voice setup
 
-Signing/notarization is not included without Apple Developer credentials.
+Set up the English and/or Turkish Vosk model directories using `ARK_VOSK_MODEL_DIR` and `ARK_VOSK_MODEL_TR_DIR`, or place the model files in the resolved runtime model directories. On macOS, grant microphone permission to the terminal or desktop application.
 
-## 🎙️ Vosk voice setup
+## Testing
 
-ARK voice remains local-only. Model directories are resolved in this order:
+The repository contains Python `unittest` coverage for runtime initialization, memory persistence and domain isolation, MCP tool permissions, RAG behavior, web research security and integrated workflows.
 
-1. `ARK_VOSK_MODEL_DIR` and `ARK_VOSK_MODEL_TR_DIR`
-2. Project folders: `model/` and `model_tr/`
-3. App data folders under `~/Library/Application Support/ARK/`
+Run the test suite from the repository root:
 
-If models are missing, voice endpoints return a setup error instead of crashing.
+```bash
+python -m unittest discover -s tests -v
+```
 
-Microphone permission (macOS):
+## Security model and limitations
 
-- Open **System Settings → Privacy & Security → Microphone**
-- Allow access for the terminal or app process running ARK
+- Local-first operation: local model inference, SQLite memory and LanceDB storage are available without a hosted AI service.
+- Network access is used only by features that explicitly need it, such as web research, remote page fetching and GitHub API integration.
+- GitHub integration is read-only in the current implementation.
+- Local tool permissions distinguish read, write and admin access; sensitive operations may require confirmation.
+- Web research validates destinations and blocks private/local network targets.
+- The desktop launcher binds to loopback by default. Do not expose the local UI to an untrusted network without adding authentication and deployment hardening.
+- macOS workspace automation requires user-granted system permissions and is not portable to other operating systems.
 
-## 🔒 Privacy and data locations
+## Development status
 
-- Local-first by default.
-- No cloud AI dependency for core assistant runtime.
-- User data is stored outside the packaged app using platform-aware paths.
-- Bundle must not include private SQLite/LanceDB/documents.
+ARK is an actively developed system. The architecture described here reflects the current repository implementation: Python-based application orchestration, provider abstraction with Ollama implementation, separate SQLite memory and LanceDB RAG layers, managed local tools, optional web/GitHub integrations, and a Go-based execution/automation layer.
 
-Detailed setup and troubleshooting: [docs/macos_desktop_setup.md](docs/macos_desktop_setup.md)
-⌨️ Command Modes & Automations
-Mode ID	Command Name	Description	Trigger Keywords
-01	Work	Resets to Space 1, launches Spotify + Gmail, moves to Space 2 for Safari research, opens VS Code + Notes in Space 3.	work, coding, office
-02	Research	Activates Safari and sets focus for web analysis.	research, browser, study
-03	Social	Launches communication apps (WhatsApp, Instagram) with delay buffers.	social, chat, messages
-04	HUD	Opens system resource monitoring (btop) in Terminal.	hud, monitor, stats
-🚧 Current Limitations & Future Roadmap
-ARK is under active development. Current roadmap milestones include:
-[ ] RAG Retrieval Evaluation Pipeline: Integrate automated evaluation frameworks (Ragas/TruLens) for precision/recall benchmarking across vector stores.
-[ ] Memory Consolidation Agent: Automated periodic background task to summarize old chat threads into long-term user facts in SQLite (user_memory).
-[ ] MCP Error Recovery & Fallbacks: Self-healing retry mechanisms for file parsing errors or vector insertion failures.
-[ ] Automated Integration Tests: Comprehensive E2E test suites for Go CLI subprocess bridges and Python API routes.
-[ ] Vision Model Lifecycle Optimization: Dynamic unload signals to Ollama API to free VRAM/RAM immediately after processing image queues.
-## 📜 License
+## License
 
-This project is open-source under the MIT License. Designed and built with high standards of privacy and software engineering principles.
+See [LICENSE](LICENSE) for license terms.
