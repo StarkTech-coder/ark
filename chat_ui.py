@@ -90,7 +90,13 @@ ARK_BIN = str(PATHS.ark_bin_path)
 configure_logging()
 logger = logging.getLogger("ark.chat_ui")
 
-VALID_KNOWLEDGE_DOMAINS = {"personal", "messages", "university", "starktech", "projects"}
+VALID_KNOWLEDGE_DOMAINS = {
+    "personal",
+    "messages",
+    "university",
+    "starktech",
+    "projects",
+}
 
 
 def _infer_domain_from_prompt(prompt: str) -> str | None:
@@ -98,15 +104,25 @@ def _infer_domain_from_prompt(prompt: str) -> str | None:
     if not text.strip():
         return None
 
-    if any(k in text for k in ["üniversite", "ders", "lecture", "akademik", "tez", "final"]):
+    if any(
+        k in text for k in ["üniversite", "ders", "lecture", "akademik", "tez", "final"]
+    ):
         return "university"
     if any(k in text for k in ["starktech", "şirket", "company", "kurumsal"]):
         return "starktech"
-    if any(k in text for k in ["proje", "project", "kod", "code", "bug", "api", "repo", "function"]):
+    if any(
+        k in text
+        for k in ["proje", "project", "kod", "code", "bug", "api", "repo", "function"]
+    ):
         return "projects"
-    if any(k in text for k in ["mesaj", "whatsapp", "sohbet", "chat geçmişi", "konuşmalarımız"]):
+    if any(
+        k in text
+        for k in ["mesaj", "whatsapp", "sohbet", "chat geçmişi", "konuşmalarımız"]
+    ):
         return "messages"
-    if any(k in text for k in ["benim", "kişisel", "tercihim", "bana dair", "hakkımda"]):
+    if any(
+        k in text for k in ["benim", "kişisel", "tercihim", "bana dair", "hakkımda"]
+    ):
         return "personal"
     return None
 
@@ -115,7 +131,10 @@ def _analyze_request_workflow(prompt: str) -> dict[str, Any]:
     text = (prompt or "").strip()
     lower = text.lower()
 
-    is_web = any(k in lower for k in ["güncel", "latest", "news", "haber", "araştır", "internette", "webde"])
+    is_web = any(
+        k in lower
+        for k in ["güncel", "latest", "news", "haber", "araştır", "internette", "webde"]
+    )
     is_github = any(
         k in lower
         for k in [
@@ -131,8 +150,21 @@ def _analyze_request_workflow(prompt: str) -> dict[str, Any]:
             "source code",
         ]
     )
-    is_memory = any(k in lower for k in ["hatırla", "hatırlıyor musun", "tercih", "bana dair", "geçmiş konuşma", "mesaj"])
-    is_project = any(k in lower for k in ["proje", "kod", "code", "bug", "hata", "refactor", "api", "repo"])
+    is_memory = any(
+        k in lower
+        for k in [
+            "hatırla",
+            "hatırlıyor musun",
+            "tercih",
+            "bana dair",
+            "geçmiş konuşma",
+            "mesaj",
+        ]
+    )
+    is_project = any(
+        k in lower
+        for k in ["proje", "kod", "code", "bug", "hata", "refactor", "api", "repo"]
+    )
     is_tool_request = lower.startswith("/cmd") or "araç" in lower or "tool" in lower
 
     domain = _infer_domain_from_prompt(text)
@@ -177,7 +209,9 @@ def _format_used_sources(sources: dict[str, Any]) -> str:
     if memory_items:
         lines = ["- Memory"]
         for item in memory_items[:5]:
-            lines.append(f"  - domain: {item.get('domain', 'unknown')} | source: {item.get('source', 'memory')}")
+            lines.append(
+                f"  - domain: {item.get('domain', 'unknown')} | source: {item.get('source', 'memory')}"
+            )
         parts.append("\n".join(lines))
 
     rag_items = sources.get("rag", [])
@@ -202,7 +236,9 @@ def _format_used_sources(sources: dict[str, Any]) -> str:
     if mcp_items:
         lines = ["- MCP Araçları"]
         for item in mcp_items[:5]:
-            lines.append(f"  - {item.get('tool', 'unknown')} ({item.get('status', 'used')})")
+            lines.append(
+                f"  - {item.get('tool', 'unknown')} ({item.get('status', 'used')})"
+            )
         parts.append("\n".join(lines))
 
     github_items = sources.get("github", [])
@@ -230,7 +266,9 @@ def _extract_pr_number(prompt: str) -> int | None:
         return None
 
 
-def _collect_github_context(*, prompt: str, session_id: str, user_id: str) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
+def _collect_github_context(
+    *, prompt: str, session_id: str, user_id: str
+) -> tuple[str, list[dict[str, str]], list[dict[str, str]]]:
     repo_auth = MCP_MANAGER.authorize_tool_execution(
         session_id=session_id,
         user_id=user_id,
@@ -260,15 +298,25 @@ def _collect_github_context(*, prompt: str, session_id: str, user_id: str) -> tu
     repo_ref = parse_repo_reference(prompt, repos)
     lowered = (prompt or "").lower()
 
-    if "list" in lowered and "repo" in lowered or "github repos" in lowered or "github repository" in lowered:
-        rows = "\n".join(f"- {r['full_name']} (updated: {r['updated_at']})" for r in repos[:20])
-        used_sources.extend({"label": "repo", "value": r["full_name"]} for r in repos[:5])
+    if (
+        "list" in lowered
+        and "repo" in lowered
+        or "github repos" in lowered
+        or "github repository" in lowered
+    ):
+        rows = "\n".join(
+            f"- {r['full_name']} (updated: {r['updated_at']})" for r in repos[:20]
+        )
+        used_sources.extend(
+            {"label": "repo", "value": r["full_name"]} for r in repos[:5]
+        )
         return f"[GITHUB REPOSITORIES]\n{rows}", used_mcp, used_sources
 
     if not repo_ref:
         hint = "\n".join(f"- {r['full_name']}" for r in repos[:8])
         return (
-            "[GITHUB]\nRepository adı tespit edilemedi. Erişilebilir örnekler:\n" + hint,
+            "[GITHUB]\nRepository adı tespit edilemedi. Erişilebilir örnekler:\n"
+            + hint,
             used_mcp,
             [{"label": "repo_hint", "value": r["full_name"]} for r in repos[:5]],
         )
@@ -283,7 +331,11 @@ def _collect_github_context(*, prompt: str, session_id: str, user_id: str) -> tu
             server_id="local.github",
             tool_name=tool_name,
             confirmed=True,
-            metadata={"source": "chat_pipeline", "feature": "github", "repo": f"{owner}/{repo}"},
+            metadata={
+                "source": "chat_pipeline",
+                "feature": "github",
+                "repo": f"{owner}/{repo}",
+            },
         )
         if auth.allowed:
             used_mcp.append({"tool": f"local.github/{tool_name}", "status": "used"})
@@ -293,12 +345,16 @@ def _collect_github_context(*, prompt: str, session_id: str, user_id: str) -> tu
 
     blocks: list[str] = []
 
-    if any(k in lowered for k in ["structure", "file structure", "mimari", "architecture", "yapı"]):
+    if any(
+        k in lowered
+        for k in ["structure", "file structure", "mimari", "architecture", "yapı"]
+    ):
         if _authorize("inspect_repository_structure"):
             tree = inspect_repository_structure(owner, repo, max_entries=300)
             tree_lines = [f"- {row['type']}: {row['path']}" for row in tree[:120]]
             return (
-                f"[GITHUB REPOSITORY STRUCTURE | {owner}/{repo}]\n" + "\n".join(tree_lines),
+                f"[GITHUB REPOSITORY STRUCTURE | {owner}/{repo}]\n"
+                + "\n".join(tree_lines),
                 used_mcp,
                 used_sources,
             )
@@ -306,16 +362,34 @@ def _collect_github_context(*, prompt: str, session_id: str, user_id: str) -> tu
     if "commit" in lowered:
         if _authorize("list_commits"):
             commits = list_commits(owner, repo, limit=10)
-            lines = [f"- {c['sha'][:10]} | {c['author']} | {c['date']} | {c['message']}" for c in commits]
-            used_sources.extend({"label": "commit", "value": c["sha"]} for c in commits[:5])
-            return f"[GITHUB COMMITS | {owner}/{repo}]\n" + "\n".join(lines), used_mcp, used_sources
+            lines = [
+                f"- {c['sha'][:10]} | {c['author']} | {c['date']} | {c['message']}"
+                for c in commits
+            ]
+            used_sources.extend(
+                {"label": "commit", "value": c["sha"]} for c in commits[:5]
+            )
+            return (
+                f"[GITHUB COMMITS | {owner}/{repo}]\n" + "\n".join(lines),
+                used_mcp,
+                used_sources,
+            )
 
     if "issue" in lowered:
         if _authorize("list_issues"):
             issues = list_issues(owner, repo, state="open", limit=20)
-            lines = [f"- #{i['number']} [{i['state']}] {i['title']} ({i['url']})" for i in issues]
-            used_sources.extend({"label": "issue", "value": f"#{i['number']}"} for i in issues[:5])
-            return f"[GITHUB ISSUES | {owner}/{repo}]\n" + "\n".join(lines), used_mcp, used_sources
+            lines = [
+                f"- #{i['number']} [{i['state']}] {i['title']} ({i['url']})"
+                for i in issues
+            ]
+            used_sources.extend(
+                {"label": "issue", "value": f"#{i['number']}"} for i in issues[:5]
+            )
+            return (
+                f"[GITHUB ISSUES | {owner}/{repo}]\n" + "\n".join(lines),
+                used_mcp,
+                used_sources,
+            )
 
     if "pull request" in lowered or " pr " in f" {lowered} ":
         pr_number = _extract_pr_number(prompt)
@@ -329,9 +403,18 @@ def _collect_github_context(*, prompt: str, session_id: str, user_id: str) -> tu
             )
         if _authorize("list_pull_requests"):
             prs = list_pull_requests(owner, repo, state="open", limit=20)
-            lines = [f"- #{p['number']} [{p['state']}] {p['title']} ({p['url']})" for p in prs]
-            used_sources.extend({"label": "pull_request", "value": f"#{p['number']}"} for p in prs[:5])
-            return f"[GITHUB PULL REQUESTS | {owner}/{repo}]\n" + "\n".join(lines), used_mcp, used_sources
+            lines = [
+                f"- #{p['number']} [{p['state']}] {p['title']} ({p['url']})"
+                for p in prs
+            ]
+            used_sources.extend(
+                {"label": "pull_request", "value": f"#{p['number']}"} for p in prs[:5]
+            )
+            return (
+                f"[GITHUB PULL REQUESTS | {owner}/{repo}]\n" + "\n".join(lines),
+                used_mcp,
+                used_sources,
+            )
 
     file_match = re.search(r"(?:file|dosya)\s+([\w./\-]+)", prompt, flags=re.IGNORECASE)
     if file_match and _authorize("read_repository_file"):
@@ -339,7 +422,8 @@ def _collect_github_context(*, prompt: str, session_id: str, user_id: str) -> tu
         payload = read_repository_file(owner, repo, file_path)
         used_sources.append({"label": "file", "value": payload.get("path", file_path)})
         return (
-            f"[GITHUB FILE | {owner}/{repo}:{payload.get('path', file_path)}]\n" + str(payload.get("content", ""))[:12000],
+            f"[GITHUB FILE | {owner}/{repo}:{payload.get('path', file_path)}]\n"
+            + str(payload.get("content", ""))[:12000],
             used_mcp,
             used_sources,
         )
@@ -348,12 +432,14 @@ def _collect_github_context(*, prompt: str, session_id: str, user_id: str) -> tu
     if _authorize("inspect_repository_structure"):
         tree = inspect_repository_structure(owner, repo, max_entries=120)
         blocks.append(
-            "[GITHUB STRUCTURE]\n" + "\n".join(f"- {row['type']}: {row['path']}" for row in tree[:60])
+            "[GITHUB STRUCTURE]\n"
+            + "\n".join(f"- {row['type']}: {row['path']}" for row in tree[:60])
         )
     if _authorize("list_commits"):
         commits = list_commits(owner, repo, limit=8)
         blocks.append(
-            "[GITHUB RECENT COMMITS]\n" + "\n".join(
+            "[GITHUB RECENT COMMITS]\n"
+            + "\n".join(
                 f"- {c['sha'][:10]} | {c['author']} | {c['message']}" for c in commits
             )
         )
@@ -361,22 +447,26 @@ def _collect_github_context(*, prompt: str, session_id: str, user_id: str) -> tu
     if _authorize("list_issues"):
         issues = list_issues(owner, repo, state="open", limit=10)
         blocks.append(
-            "[GITHUB OPEN ISSUES]\n" + "\n".join(
-                f"- #{i['number']} {i['title']}" for i in issues[:10]
-            )
+            "[GITHUB OPEN ISSUES]\n"
+            + "\n".join(f"- #{i['number']} {i['title']}" for i in issues[:10])
         )
-        used_sources.extend({"label": "issue", "value": f"#{i['number']}"} for i in issues[:5])
+        used_sources.extend(
+            {"label": "issue", "value": f"#{i['number']}"} for i in issues[:5]
+        )
     if _authorize("list_pull_requests"):
         prs = list_pull_requests(owner, repo, state="open", limit=10)
         blocks.append(
-            "[GITHUB OPEN PRS]\n" + "\n".join(
-                f"- #{p['number']} {p['title']}" for p in prs[:10]
-            )
+            "[GITHUB OPEN PRS]\n"
+            + "\n".join(f"- #{p['number']} {p['title']}" for p in prs[:10])
         )
-        used_sources.extend({"label": "pull_request", "value": f"#{p['number']}"} for p in prs[:5])
+        used_sources.extend(
+            {"label": "pull_request", "value": f"#{p['number']}"} for p in prs[:5]
+        )
 
     if not blocks:
-        blocks.append("[GITHUB]\nUygun GitHub aracı çalıştırılamadı veya izin engellendi.")
+        blocks.append(
+            "[GITHUB]\nUygun GitHub aracı çalıştırılamadı veya izin engellendi."
+        )
     return "\n\n".join(blocks), used_mcp, used_sources
 
 
@@ -389,7 +479,7 @@ config_data = load_config()
 DEFAULT_ACTIVE_MODEL = get_active_chat_model()
 CHAT_PROVIDER = get_chat_provider()
 MCP_MANAGER = MCPManager()
-
+MCP_MANAGER.bootstrap_defaults()
 LISTENING_AUDIO_PATH = os.path.join(
     str(PATHS.assets_dir),
     config_data.get("assets", {}).get("listening_sound", "ark_listening.wav"),
@@ -451,6 +541,7 @@ def _validate_sensitive_endpoint_access(request: Request) -> None:
         if provided_token != ENDPOINT_PROTECTION_TOKEN:
             raise HTTPException(status_code=401, detail="Invalid endpoint token")
 
+
 # ============================================================================
 # FASTAPI STATIC MOUNT
 # ============================================================================
@@ -465,7 +556,6 @@ app.mount(
 @app.on_event("startup")
 async def _ark_startup() -> None:
     status = await initialize_runtime(chat_provider=CHAT_PROVIDER)
-    MCP_MANAGER.bootstrap_defaults()
     if not status.critical_ready:
         logger.error("Critical service initialization failed: %s", status.details)
         return
@@ -484,9 +574,12 @@ async def _ark_shutdown() -> None:
 
 
 def _request_identity(request: Request) -> tuple[str, str]:
-    session_id = request.headers.get("x-ark-session-id", "api-session").strip() or "api-session"
+    session_id = (
+        request.headers.get("x-ark-session-id", "api-session").strip() or "api-session"
+    )
     user_id = request.headers.get("x-ark-user-id", "api-user").strip() or "api-user"
     return session_id, user_id
+
 
 # ============================================================================
 # GLOBAL & SESSION STATE DEFAULTS (Single-User Optimized)
@@ -702,7 +795,13 @@ async def process_user_prompt_with_rag_and_web(
         f"[ARK PIPELINE] Evaluating prompt. RAG Active: {rag_active}, Web Active: {web_search_active}"
     )
 
-    used_sources: dict[str, Any] = {"memory": [], "rag": [], "web": [], "mcp": [], "github": []}
+    used_sources: dict[str, Any] = {
+        "memory": [],
+        "rag": [],
+        "web": [],
+        "mcp": [],
+        "github": [],
+    }
 
     if github_context:
         collected_contexts.append(github_context)
@@ -714,7 +813,9 @@ async def process_user_prompt_with_rag_and_web(
     if memory_context:
         memory_lines = []
         for row in memory_context:
-            memory_lines.append(f"- ({row.get('domain', 'personal')}) {row.get('content', '')}")
+            memory_lines.append(
+                f"- ({row.get('domain', 'personal')}) {row.get('content', '')}"
+            )
             used_sources["memory"].append(
                 {
                     "domain": row.get("domain", "personal"),
@@ -755,7 +856,9 @@ async def process_user_prompt_with_rag_and_web(
                         "domain": item.domain,
                     }
                 )
-                used_sources["mcp"].append({"tool": "local.webresearch/search_web", "status": "used"})
+                used_sources["mcp"].append(
+                    {"tool": "local.webresearch/search_web", "status": "used"}
+                )
             if web_context:
                 collected_contexts.append(
                     "[WEB RESEARCH SOURCES]\n" + "\n\n".join(web_context)
@@ -765,7 +868,9 @@ async def process_user_prompt_with_rag_and_web(
                 f"[WEB RESEARCH ERROR]\nSecure web research failed: {exc}"
             )
     elif web_requested and not web_allowed:
-        used_sources["mcp"].append({"tool": "local.webresearch/search_web", "status": "blocked"})
+        used_sources["mcp"].append(
+            {"tool": "local.webresearch/search_web", "status": "blocked"}
+        )
         collected_contexts.append(
             "[WEB RESEARCH BLOCKED]\nMCP permission denied for secure web research tools."
         )
@@ -880,13 +985,24 @@ async def api_listen_stt(request: Request):
     session_id, _ = _request_identity(request)
     loop = asyncio.get_event_loop()
     try:
-        text = await loop.run_in_executor(None, record_and_recognize, session_id, 20, True)
+        text = await loop.run_in_executor(
+            None, record_and_recognize, session_id, 20, True
+        )
     except VoiceModelNotAvailableError as exc:
-        return JSONResponse({"status": "error", "code": "model_missing", "detail": str(exc)}, status_code=503)
+        return JSONResponse(
+            {"status": "error", "code": "model_missing", "detail": str(exc)},
+            status_code=503,
+        )
     except VoiceMicrophoneError as exc:
-        return JSONResponse({"status": "error", "code": "microphone_unavailable", "detail": str(exc)}, status_code=503)
+        return JSONResponse(
+            {"status": "error", "code": "microphone_unavailable", "detail": str(exc)},
+            status_code=503,
+        )
     except VoiceSessionBusyError as exc:
-        return JSONResponse({"status": "error", "code": "session_busy", "detail": str(exc)}, status_code=409)
+        return JSONResponse(
+            {"status": "error", "code": "session_busy", "detail": str(exc)},
+            status_code=409,
+        )
     return JSONResponse({"text": text})
 
 
@@ -928,13 +1044,24 @@ async def api_listen_cmd(request: Request):
         )
 
     try:
-        cmd_text = await loop.run_in_executor(None, record_and_recognize, session_id, 6, False)
+        cmd_text = await loop.run_in_executor(
+            None, record_and_recognize, session_id, 6, False
+        )
     except VoiceModelNotAvailableError as exc:
-        return JSONResponse({"status": "error", "code": "model_missing", "detail": str(exc)}, status_code=503)
+        return JSONResponse(
+            {"status": "error", "code": "model_missing", "detail": str(exc)},
+            status_code=503,
+        )
     except VoiceMicrophoneError as exc:
-        return JSONResponse({"status": "error", "code": "microphone_unavailable", "detail": str(exc)}, status_code=503)
+        return JSONResponse(
+            {"status": "error", "code": "microphone_unavailable", "detail": str(exc)},
+            status_code=503,
+        )
     except VoiceSessionBusyError as exc:
-        return JSONResponse({"status": "error", "code": "session_busy", "detail": str(exc)}, status_code=409)
+        return JSONResponse(
+            {"status": "error", "code": "session_busy", "detail": str(exc)},
+            status_code=409,
+        )
     cmd_text_clean = cmd_text.strip().lower()
 
     if not cmd_text_clean or "error" in cmd_text_clean or "hata" in cmd_text_clean:
@@ -1176,7 +1303,9 @@ async def main(message: cl.Message) -> None:
             metadata={"source": "chat_command", "command": "/research"},
         )
         if not search_auth.allowed or not read_auth.allowed:
-            denied_reason = search_auth.reason if not search_auth.allowed else read_auth.reason
+            denied_reason = (
+                search_auth.reason if not search_auth.allowed else read_auth.reason
+            )
             await cl.Message(
                 content=f"⛔ Web research blocked by MCP permissions: `{denied_reason}`",
                 author="ARK",
@@ -1225,7 +1354,13 @@ async def main(message: cl.Message) -> None:
             return
 
         indices_raw, domain = parts[0], parts[1].strip().lower()
-        allowed_domains = {"personal", "messages", "university", "starktech", "projects"}
+        allowed_domains = {
+            "personal",
+            "messages",
+            "university",
+            "starktech",
+            "projects",
+        }
         if domain not in allowed_domains:
             await cl.Message(
                 content="⚠️ Geçersiz domain. Geçerli: personal, messages, university, starktech, projects",
@@ -1234,7 +1369,9 @@ async def main(message: cl.Message) -> None:
             return
 
         research_cache = cl.user_session.get("last_web_research")
-        if not isinstance(research_cache, dict) or not isinstance(research_cache.get("sources"), list):
+        if not isinstance(research_cache, dict) or not isinstance(
+            research_cache.get("sources"), list
+        ):
             await cl.Message(
                 content="⚠️ Önce `/research ...` ile araştırma yapmalısın.",
                 author="ARK",
@@ -1250,7 +1387,11 @@ async def main(message: cl.Message) -> None:
             metadata={"source": "chat_command", "command": "/research_add"},
         )
         if not auth.allowed:
-            guidance = " Onay için `/research_add! ...` kullan." if auth.reason == "confirmation_required" else ""
+            guidance = (
+                " Onay için `/research_add! ...` kullan."
+                if auth.reason == "confirmation_required"
+                else ""
+            )
             await cl.Message(
                 content=f"⛔ Kaynak indeksleme engellendi: `{auth.reason}`.{guidance}",
                 author="ARK",
@@ -1277,23 +1418,29 @@ async def main(message: cl.Message) -> None:
             if source_pos < 0 or source_pos >= len(source_rows):
                 continue
             source = source_rows[source_pos]
-            source_url = str(source.get("source_url", "")).strip() or str(source.get("domain", "web_source"))
+            source_url = str(source.get("source_url", "")).strip() or str(
+                source.get("domain", "web_source")
+            )
             web_source = WebSource(
                 source_title=str(source.get("source_title", "Untitled")),
                 source_url=source_url,
                 domain=str(source.get("domain", "")),
-                publication_date=(str(source.get("publication_date", "")).strip() or None),
+                publication_date=(
+                    str(source.get("publication_date", "")).strip() or None
+                ),
                 access_date=str(source.get("access_date", "")),
                 extracted_content=str(source.get("extracted_content", "")),
                 relevant_excerpt=str(source.get("relevant_excerpt", "")),
             )
-            doc_text = build_research_document_for_rag(
-                source=web_source
-            )
+            doc_text = build_research_document_for_rag(source=web_source)
             process_and_store_document(
                 file_content=doc_text,
                 file_name=source_url,
-                category=("relationship" if domain in {"personal", "messages"} else "code" if domain in {"projects", "starktech"} else "university"),
+                category=(
+                    "relationship"
+                    if domain in {"personal", "messages"}
+                    else "code" if domain in {"projects", "starktech"} else "university"
+                ),
             )
             indexed_count += 1
 
@@ -1359,7 +1506,11 @@ async def main(message: cl.Message) -> None:
             metadata={"source": "chat_command", "command": cmd_text},
         )
         if not auth.allowed:
-            guidance = " Use `/cmd! ...` to explicitly confirm this sensitive action." if auth.reason == "confirmation_required" else ""
+            guidance = (
+                " Use `/cmd! ...` to explicitly confirm this sensitive action."
+                if auth.reason == "confirmation_required"
+                else ""
+            )
             await cl.Message(
                 content=(
                     "⛔ **MCP authorization blocked command execution.** "
@@ -1394,7 +1545,9 @@ async def main(message: cl.Message) -> None:
     save_message("user", raw_text, thread_id=thread_id, user_id=user_identifier)
 
     web_allowed = True
-    web_requested = bool(GLOBAL_APP_STATE.get("web_search_active", False) or workflow["use_web"])
+    web_requested = bool(
+        GLOBAL_APP_STATE.get("web_search_active", False) or workflow["use_web"]
+    )
     if web_requested:
         search_auth = MCP_MANAGER.authorize_tool_execution(
             session_id=thread_id,
@@ -1434,7 +1587,12 @@ async def main(message: cl.Message) -> None:
         except Exception as exc:
             logger.warning("Memory lookup unavailable: %s", exc)
 
-    rag_domains = [str(selected_domain)] if selected_domain in {"projects", "university", "starktech", "messages", "personal"} else None
+    rag_domains = (
+        [str(selected_domain)]
+        if selected_domain
+        in {"projects", "university", "starktech", "messages", "personal"}
+        else None
+    )
 
     github_context = None
     github_sources: list[dict[str, str]] = []
@@ -1457,7 +1615,9 @@ async def main(message: cl.Message) -> None:
             github_mcp_tools = [{"tool": "local.github", "status": "error"}]
         except Exception as exc:
             logger.warning("GitHub integration failure: %s", exc)
-            github_context = "[GITHUB ERROR]\nGitHub entegrasyonu şu anda kullanılamıyor."
+            github_context = (
+                "[GITHUB ERROR]\nGitHub entegrasyonu şu anda kullanılamıyor."
+            )
             github_mcp_tools = [{"tool": "local.github", "status": "error"}]
 
     processed_prompt, used_sources = await process_user_prompt_with_rag_and_web(
@@ -1473,7 +1633,12 @@ async def main(message: cl.Message) -> None:
         github_mcp_tools=github_mcp_tools,
     )
 
-    logger.debug("RAG active=%s web_active=%s prompt_length=%s", rag_active, GLOBAL_APP_STATE["web_search_active"], len(processed_prompt))
+    logger.debug(
+        "RAG active=%s web_active=%s prompt_length=%s",
+        rag_active,
+        GLOBAL_APP_STATE["web_search_active"],
+        len(processed_prompt),
+    )
 
     recent_history = get_recent_history(
         limit=6,
@@ -1572,7 +1737,9 @@ You are Berk's private AI assistant, ARK."""
     if not clean_processing_response:
         clean_processing_response = full_response
 
-    final_response_for_user = clean_processing_response + _format_used_sources(used_sources)
+    final_response_for_user = clean_processing_response + _format_used_sources(
+        used_sources
+    )
 
     save_message(
         "assistant",

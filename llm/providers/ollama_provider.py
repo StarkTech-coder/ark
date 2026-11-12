@@ -14,6 +14,13 @@ class ProviderRuntimeError(RuntimeError):
     """Raised when provider runtime operations fail."""
 
 
+def _response_field(value: Any, field: str, default: Any = None) -> Any:
+    """Read a field from either a dictionary or an Ollama SDK model."""
+    if isinstance(value, dict):
+        return value.get(field, default)
+    return getattr(value, field, default)
+
+
 class OllamaProvider(LLMProvider):
     """Ollama runtime adapter for chat/generation/model discovery operations."""
 
@@ -55,16 +62,14 @@ class OllamaProvider(LLMProvider):
                     f"Ollama chat request failed for model '{target_model}': {e}"
                 ) from e
 
-            if not isinstance(response, dict):
-                raise ProviderRuntimeError(
-                    "Ollama chat response is not a JSON object"
-                )
+            message = _response_field(response, "message", {})
+            content = _response_field(message, "content", "")
 
-            content = (response.get("message", {}) or {}).get("content", "")
             if not isinstance(content, str):
                 raise ProviderRuntimeError(
                     "Ollama chat response content is missing or invalid"
                 )
+
             return content
 
         payload = {
@@ -84,14 +89,13 @@ class OllamaProvider(LLMProvider):
                 f"Ollama generate request failed for model '{target_model}': {e}"
             ) from e
 
-        if not isinstance(response, dict):
-            raise ProviderRuntimeError("Ollama generate response is not a JSON object")
+        text = _response_field(response, "response", "")
 
-        text = response.get("response", "")
         if not isinstance(text, str):
             raise ProviderRuntimeError(
                 "Ollama generate response text is missing or invalid"
             )
+
         return text
 
     async def stream_response(
@@ -121,32 +125,42 @@ class OllamaProvider(LLMProvider):
             ) from e
 
         async for chunk in stream:
-            if not isinstance(chunk, dict):
-                raise ProviderRuntimeError("Ollama stream chunk is not a JSON object")
+            message = _response_field(chunk, "message", {})
+            token = _response_field(message, "content", "")
 
-            token = (chunk.get("message", {}) or {}).get("content", "")
             if token and not isinstance(token, str):
-                raise ProviderRuntimeError(
-                    "Ollama stream token content is invalid"
-                )
+                raise ProviderRuntimeError("Ollama stream token content is invalid")
+
             if token:
                 yield token
 
     async def list_available_models(self) -> list[str]:
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(f"{self._host}/api/tags", timeout=5.0)
+                response = await client.get(
+                    f"{self._host}/api/tags",
+                    timeout=5.0,
+                )
+
             if response.status_code != 200:
                 raise ProviderRuntimeError(
                     f"Ollama model listing failed with HTTP {response.status_code}"
                 )
+
             payload = response.json()
             models = payload.get("models", [])
+
             if not isinstance(models, list):
                 raise ProviderRuntimeError(
                     "Ollama model listing payload is invalid: 'models' is not a list"
                 )
-            return [m.get("name", "") for m in models if isinstance(m, dict) and m.get("name")]
+
+            return [
+                m.get("name", "")
+                for m in models
+                if isinstance(m, dict) and m.get("name")
+            ]
+
         except ProviderRuntimeError:
             raise
         except Exception as e:
@@ -157,7 +171,10 @@ class OllamaProvider(LLMProvider):
     async def check_provider_health(self) -> bool:
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(f"{self._host}/api/tags", timeout=5.0)
+                response = await client.get(
+                    f"{self._host}/api/tags",
+                    timeout=5.0,
+                )
             return response.status_code == 200
         except Exception:
             return False
@@ -172,10 +189,12 @@ class OllamaProvider(LLMProvider):
 
     async def switch_model(self, model: str) -> ActiveModelInfo:
         candidate = (model or "").strip()
+
         if not candidate:
             raise ValueError("Model name cannot be empty")
 
         models = await self.list_available_models()
+
         if models and candidate not in models:
             raise ProviderRuntimeError(
                 f"Model '{candidate}' is not available in Ollama runtime"
@@ -186,6 +205,7 @@ class OllamaProvider(LLMProvider):
 
     async def close(self) -> None:
         close_fn = getattr(self._client, "close", None)
+
         if callable(close_fn):
             try:
                 result = close_fn()
